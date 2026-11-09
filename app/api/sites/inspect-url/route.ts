@@ -6,7 +6,8 @@ export const maxDuration = 60; // Allow sufficient time for multi-page crawling
 
 // Helper to inspect forms on an individual loaded page
 async function extractFormsFromPage(page: Page, pageUrl: string) {
-  return await page.evaluate((url) => {
+  return await page.evaluate((pageUrl) => {
+    const currentUrl = pageUrl || window.location.href;
     const formContainers: any[] = [];
     const rawForms = Array.from(document.querySelectorAll('form'));
     rawForms.forEach((f) => {
@@ -186,8 +187,8 @@ async function extractFormsFromPage(page: Page, pageUrl: string) {
       }
 
       return {
-        id: `form-${pageUrl.replace(/[^a-zA-Z0-9]/g, '-')}-${index}`,
-        pageUrl,
+        id: `form-${currentUrl.replace(/[^a-zA-Z0-9]/g, '-')}-${index}`,
+        pageUrl: currentUrl,
         pageTitle,
         title: formTitle,
         detectedPlugin,
