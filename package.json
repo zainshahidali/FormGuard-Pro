@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "test:db": "node scripts/test-db.mjs",
     "test:playwright": "npx tsx scripts/test-playwright.mjs",
+    "seed": "node scripts/seed-demo.mjs",
     "cron:run": "node scripts/cron-runner.mjs"
   },
   "dependencies": {

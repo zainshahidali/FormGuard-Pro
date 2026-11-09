@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -10,6 +10,7 @@ import {
   FileText,
   Settings,
   Activity,
+  Database,
   Globe,
 } from 'lucide-react';
 
@@ -22,6 +23,20 @@ const NAV_ITEMS = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const [dbStatus, setDbStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
+
+  useEffect(() => {
+    fetch('/api/health')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.database?.connected) {
+          setDbStatus('connected');
+        } else {
+          setDbStatus('disconnected');
+        }
+      })
+      .catch(() => setDbStatus('disconnected'));
+  }, []);
 
   return (
     <aside className="w-64 bg-navy-800 border-r border-surface-border flex flex-col justify-between shrink-0 min-h-screen">
@@ -72,19 +87,38 @@ export default function Sidebar() {
       </div>
 
       {/* Footer Info Card */}
-      <div className="p-4 border-t border-surface-border">
-        <div className="bg-surface rounded-lg p-3.5 border border-surface-border text-xs">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-slate-400 flex items-center gap-1.5">
-              <Activity className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-              Engine Status
+      <div className="p-4 border-t border-surface-border space-y-2">
+        <div className="bg-surface rounded-lg p-3 border border-surface-border text-xs space-y-2">
+          {/* DB Status */}
+          <div className="flex items-center justify-between">
+            <span className="text-slate-400 flex items-center gap-1.5 text-[11px]">
+              <Database className="w-3.5 h-3.5 text-sky-accent" />
+              Database
             </span>
-            <span className="text-emerald-400 font-semibold text-[11px] bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+            {dbStatus === 'connected' ? (
+              <span className="text-emerald-400 font-semibold text-[10px] bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                Connected
+              </span>
+            ) : dbStatus === 'checking' ? (
+              <span className="text-slate-400 font-semibold text-[10px] bg-slate-500/10 px-2 py-0.5 rounded border border-slate-500/20">
+                Checking...
+              </span>
+            ) : (
+              <span className="text-red-400 font-semibold text-[10px] bg-red-500/10 px-2 py-0.5 rounded border border-red-500/20">
+                Disconnected
+              </span>
+            )}
+          </div>
+
+          {/* Playwright Engine Status */}
+          <div className="flex items-center justify-between">
+            <span className="text-slate-400 flex items-center gap-1.5 text-[11px]">
+              <Activity className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+              Engine
+            </span>
+            <span className="text-emerald-400 font-semibold text-[10px] bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
               Online
             </span>
-          </div>
-          <div className="text-slate-400 text-[11px] leading-relaxed">
-            Headless Chromium runner ready. Alerts routed to Slack & SMTP.
           </div>
         </div>
       </div>

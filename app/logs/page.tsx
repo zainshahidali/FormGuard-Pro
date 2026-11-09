@@ -16,6 +16,7 @@ import {
   MessageSquare,
   AlertOctagon,
   ArrowRight,
+  Download,
 } from 'lucide-react';
 import LogDetailModal from '@/components/LogDetailModal';
 
@@ -115,6 +116,17 @@ function LogsContent() {
             <option value="failed">Failed Only (🚨)</option>
             <option value="passed">Passed Only (✅)</option>
           </select>
+
+          {/* Export CSV Button */}
+          <a
+            href={`/api/logs/export?siteId=${selectedSiteId}&status=${selectedStatus}`}
+            download
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-slate-200 bg-surface hover:bg-surface-hover border border-surface-border transition-colors shadow-sm"
+            title="Download logs report as CSV"
+          >
+            <Download className="w-3.5 h-3.5 text-sky-accent" />
+            <span className="hidden sm:inline">Export CSV</span>
+          </a>
         </div>
       </div>
 

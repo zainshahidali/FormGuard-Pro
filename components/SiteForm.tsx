@@ -86,9 +86,72 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
   // UI States
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
+  const [isDetecting, setIsDetecting] = useState(false);
   const [testResult, setTestResult] = useState<any>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [presetNotice, setPresetNotice] = useState<string | null>(null);
+
+  // Auto-Detect form fields and selectors from live URL using Playwright
+  const handleAutoDetect = async () => {
+    if (!url.trim() || !url.startsWith('http')) {
+      setErrorMsg('Please enter a valid page URL (starting with http:// or https://) first.');
+      return;
+    }
+
+    setIsDetecting(true);
+    setErrorMsg(null);
+
+    try {
+      const res = await fetch('/api/sites/inspect-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: url.trim() }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'Failed to inspect page form.');
+      }
+
+      const { data } = json;
+      if (data.detectedPlugin) {
+        setFormPluginType(data.detectedPlugin);
+      }
+      if (data.fields && data.fields.length > 0) {
+        setFields(data.fields);
+      }
+      if (data.submitButtonSelector) {
+        setSubmitButtonSelector(data.submitButtonSelector);
+      }
+      if (data.verificationMethod) {
+        setVerificationMethod(data.verificationMethod);
+      }
+      if (data.expectedSuccessValue) {
+        setExpectedSuccessValue(data.expectedSuccessValue);
+      }
+
+      // Auto-suggest name from domain if empty
+      if (!name.trim()) {
+        try {
+          const parsedUrl = new URL(url.trim());
+          const hostParts = parsedUrl.hostname.replace('www.', '').split('.');
+          if (hostParts.length > 0) {
+            const derived = hostParts[0].charAt(0).toUpperCase() + hostParts[0].slice(1);
+            setName(derived);
+          }
+        } catch {}
+      }
+
+      setPresetNotice(
+        `✨ Auto-detected ${data.detectedPlugin} with ${data.fields?.length || 0} fields from live page!`
+      );
+      setTimeout(() => setPresetNotice(null), 5000);
+    } catch (detectErr: any) {
+      setErrorMsg(detectErr.message || 'Auto-detection failed.');
+    } finally {
+      setIsDetecting(false);
+    }
+  };
 
   // Apply Preset
   const handleApplyPreset = (presetKey: string) => {
@@ -304,9 +367,27 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
           </div>
 
           <div className="md:col-span-2 space-y-1.5">
-            <label className="text-xs font-medium text-slate-300">
-              Exact Page URL with Form <span className="text-red-400">*</span>
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-slate-300">
+                Exact Page URL with Form <span className="text-red-400">*</span>
+              </label>
+              <button
+                type="button"
+                onClick={handleAutoDetect}
+                disabled={isDetecting || !url.trim()}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-semibold text-sky-accent bg-sky-accent/10 hover:bg-sky-accent/20 border border-sky-accent/30 transition-all disabled:opacity-40"
+              >
+                {isDetecting ? (
+                  <>
+                    <Loader2 className="w-3 h-3 animate-spin" /> Scanning Page DOM...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3 h-3" /> Auto-Detect Form from Live URL
+                  </>
+                )}
+              </button>
+            </div>
             <input
               type="url"
               required
