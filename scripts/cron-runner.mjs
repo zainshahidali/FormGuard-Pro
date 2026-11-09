@@ -169,26 +169,74 @@ async function runFormTest(site) {
 
         const type = (field.type || 'text').toLowerCase();
         const testVal = field.testValue || 'Test Value';
+        const wantsRandom = !testVal || testVal === '[Random Option]' || testVal.toLowerCase().includes('random');
 
         const inputTypeAttr = await locator.getAttribute('type').catch(() => null);
         const isHidden = inputTypeAttr === 'hidden';
+        const isSelectType = type === 'select';
 
-        if (isHidden) {
+        const customControl = locator.locator('xpath=..').locator('.mf_select__control, .mf-input-select, [class*="select__control"], [class*="custom-select"]').first();
+        const hasCustomControl = (await customControl.count().catch(() => 0)) > 0;
+
+        if (hasCustomControl || (isSelectType && isHidden)) {
+          try {
+            const clickTarget = hasCustomControl ? customControl : page.locator('.mf_select__control, .mf-input-select').first();
+            await clickTarget.click({ timeout: 4000 });
+            await page.waitForTimeout(300);
+
+            const optionLocators = page.locator('[class*="option"], [id*="react-select"][id*="option"], .select-options li');
+            const optCount = await optionLocators.count();
+
+            if (optCount > 0) {
+              let chosenIdx = Math.floor(Math.random() * optCount);
+              if (!wantsRandom) {
+                for (let i = 0; i < optCount; i++) {
+                  const optText = (await optionLocators.nth(i).textContent()) || '';
+                  if (optText.toLowerCase().includes(testVal.trim().toLowerCase())) {
+                    chosenIdx = i;
+                    break;
+                  }
+                }
+              }
+              await optionLocators.nth(chosenIdx).click({ timeout: 4000 });
+            }
+          } catch {
+            await locator.evaluate((el, val) => {
+              el.value = val === '[Random Option]' ? 'General Inquiry' : val;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            }, testVal);
+          }
+        } else if (isSelectType) {
+          try {
+            const options = await locator.locator('option').all();
+            const validIndices = [];
+            for (let i = 0; i < options.length; i++) {
+              const optText = ((await options[i].textContent()) || '').trim();
+              const optVal = ((await options[i].getAttribute('value')) || '').trim();
+              const isDis = await options[i].isDisabled();
+              const isPlaceholder = optText.toLowerCase().includes('select') || optText.toLowerCase().includes('choose') || !optText;
+              if (!isDis && (optVal || optText) && !isPlaceholder) {
+                validIndices.push(i);
+              }
+            }
+            if (wantsRandom && validIndices.length > 0) {
+              const rIdx = validIndices[Math.floor(Math.random() * validIndices.length)];
+              await locator.selectOption({ index: rIdx });
+            } else {
+              await locator.selectOption(testVal).catch(async () => {
+                await locator.selectOption({ index: validIndices[0] || 1 });
+              });
+            }
+          } catch {
+            await locator.selectOption({ index: 1 }).catch(() => {});
+          }
+        } else if (isHidden) {
           await locator.evaluate((el, val) => {
             el.value = val;
             el.dispatchEvent(new Event('input', { bubbles: true }));
             el.dispatchEvent(new Event('change', { bubbles: true }));
           }, testVal);
-        } else if (type === 'select') {
-          await locator.selectOption(testVal).catch(async () => {
-            await locator.selectOption({ index: 1 }).catch(async () => {
-              await locator.evaluate((el, val) => {
-                if (el.options && el.options.length > 1) el.selectedIndex = 1;
-                else el.value = val;
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-              }, testVal);
-            });
-          });
         } else if (type === 'checkbox') {
           if (testVal === 'true' || testVal === '1' || testVal === 'checked' || !testVal) {
             await locator.check({ force: true });

@@ -546,12 +546,24 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
               </div>
 
               <div className="sm:col-span-2">
-                <label className="text-[10px] uppercase font-semibold text-slate-400 block mb-1">
-                  Test Value
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[10px] uppercase font-semibold text-slate-400 block">
+                    Test Value
+                  </label>
+                  {field.type === 'select' && (
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateField(idx, 'testValue', '[Random Option]')}
+                      className="text-[9px] text-sky-accent hover:underline font-semibold"
+                      title="Set to dynamically pick a random live option from the dropdown"
+                    >
+                      Random
+                    </button>
+                  )}
+                </div>
                 <input
                   type="text"
-                  placeholder="Test string"
+                  placeholder={field.type === 'select' ? '[Random Option]' : 'Test string'}
                   value={field.testValue}
                   onChange={(e) => handleUpdateField(idx, 'testValue', e.target.value)}
                   className="w-full bg-surface border border-surface-border rounded px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-sky-accent"
@@ -570,6 +582,15 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
               </div>
             </div>
           ))}
+
+          {fields.some((f) => f.type === 'select') && (
+            <div className="p-3 bg-navy-900/60 rounded-lg border border-surface-border text-xs text-slate-300 flex items-center gap-2">
+              <span className="text-sky-accent font-semibold shrink-0">💡 Dropdown Tip:</span>
+              <span>
+                For <strong>Select</strong> inputs, keeping Test Value as <code className="text-amber-300 font-mono">[Random Option]</code> tells Playwright to automatically pick an available option randomly from the live website dropdown on every test run!
+              </span>
+            </div>
+          )}
 
           {fields.length === 0 && (
             <div className="p-6 text-center text-xs text-slate-400 bg-navy-800 rounded-lg border border-surface-border">

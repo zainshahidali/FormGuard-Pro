@@ -190,7 +190,7 @@ export async function POST(req: NextRequest) {
             testValue = 'FormGuard Pro automated health check test submission.';
           } else if (tagName === 'select' || nameAttr.toLowerCase().includes('service') || typeAttr === 'hidden') {
             fieldType = 'select';
-            testValue = 'General Inquiry';
+            testValue = '[Random Option]';
           } else if (typeAttr === 'checkbox') {
             fieldType = 'checkbox';
             testValue = 'true';

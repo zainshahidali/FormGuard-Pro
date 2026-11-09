@@ -72,12 +72,86 @@ export async function runFormTest(site: ISite | any): Promise<TestResult> {
 
           const fieldType = (field.type || 'text').toLowerCase();
           const valToFill = field.testValue || 'Test Value';
+          const wantsRandom = !valToFill || valToFill === '[Random Option]' || valToFill.toLowerCase().includes('random');
 
           const inputTypeAttr = await locator.getAttribute('type').catch(() => null);
           const isHidden = inputTypeAttr === 'hidden';
+          const isSelectType = fieldType === 'select';
 
-          if (isHidden) {
-            // Modern AJAX form dropdowns (MetForm, WPForms Pro) store selected values in hidden inputs
+          // Check if custom dropdown container (like MetForm/React-Select/Elementor custom select) exists
+          const customControl = locator.locator('xpath=..').locator('.mf_select__control, .mf-input-select, [class*="select__control"], [class*="custom-select"]').first();
+          const hasCustomControl = (await customControl.count().catch(() => 0)) > 0;
+
+          if (hasCustomControl || (isSelectType && isHidden)) {
+            // Modern AJAX / MetForm dropdown handling with live random option picking
+            try {
+              const clickTarget = hasCustomControl
+                ? customControl
+                : page.locator('.mf_select__control, .mf-input-select').first();
+
+              await clickTarget.click({ timeout: 4000 });
+              await page.waitForTimeout(300);
+
+              const optionLocators = page.locator(
+                '[class*="option"], [id*="react-select"][id*="option"], .select-options li, .dropdown-menu li'
+              );
+              const optCount = await optionLocators.count();
+
+              if (optCount > 0) {
+                let chosenIdx = Math.floor(Math.random() * optCount);
+                if (!wantsRandom) {
+                  for (let i = 0; i < optCount; i++) {
+                    const optText = (await optionLocators.nth(i).textContent()) || '';
+                    if (optText.toLowerCase().includes(valToFill.trim().toLowerCase())) {
+                      chosenIdx = i;
+                      break;
+                    }
+                  }
+                }
+                await optionLocators.nth(chosenIdx).click({ timeout: 4000 });
+              }
+            } catch {
+              // Fallback: evaluate value directly
+              await locator.evaluate((el: HTMLInputElement, val: string) => {
+                el.value = val === '[Random Option]' ? 'General Inquiry' : val;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+              }, valToFill);
+            }
+          } else if (isSelectType) {
+            // Standard native <select> element with random option selection
+            try {
+              const options = await locator.locator('option').all();
+              const validIndices: number[] = [];
+
+              for (let i = 0; i < options.length; i++) {
+                const optText = ((await options[i].textContent()) || '').trim();
+                const optVal = ((await options[i].getAttribute('value')) || '').trim();
+                const isDis = await options[i].isDisabled();
+                const isPlaceholder =
+                  optText.toLowerCase().includes('select') ||
+                  optText.toLowerCase().includes('choose') ||
+                  optText === '' ||
+                  optText.startsWith('--');
+
+                if (!isDis && (optVal || optText) && !isPlaceholder) {
+                  validIndices.push(i);
+                }
+              }
+
+              if (wantsRandom && validIndices.length > 0) {
+                const randomIdx = validIndices[Math.floor(Math.random() * validIndices.length)];
+                await locator.selectOption({ index: randomIdx });
+              } else {
+                await locator.selectOption(valToFill).catch(async () => {
+                  const fallbackIdx = validIndices.length > 0 ? validIndices[0] : 1;
+                  await locator.selectOption({ index: fallbackIdx });
+                });
+              }
+            } catch {
+              await locator.selectOption({ index: 1 }).catch(() => {});
+            }
+          } else if (isHidden) {
             await locator.evaluate((el: HTMLInputElement, val: string) => {
               el.value = val;
               el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -85,21 +159,6 @@ export async function runFormTest(site: ISite | any): Promise<TestResult> {
             }, valToFill);
           } else {
             switch (fieldType) {
-              case 'select':
-                await locator.selectOption(valToFill).catch(async () => {
-                  await locator.selectOption({ index: 1 }).catch(async () => {
-                    await locator.evaluate((el: HTMLSelectElement, val: string) => {
-                      if (el.options && el.options.length > 1) {
-                        el.selectedIndex = 1;
-                      } else {
-                        el.value = val;
-                      }
-                      el.dispatchEvent(new Event('change', { bubbles: true }));
-                    }, valToFill);
-                  });
-                });
-                break;
-
               case 'checkbox':
                 if (valToFill === 'true' || valToFill === '1' || valToFill === 'checked' || !valToFill) {
                   await locator.check({ force: true });
