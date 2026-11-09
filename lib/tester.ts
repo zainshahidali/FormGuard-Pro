@@ -73,29 +73,49 @@ export async function runFormTest(site: ISite | any): Promise<TestResult> {
           const fieldType = (field.type || 'text').toLowerCase();
           const valToFill = field.testValue || 'Test Value';
 
-          switch (fieldType) {
-            case 'select':
-              await locator.selectOption(valToFill).catch(async () => {
-                // If value doesn't match, select first available non-empty option
-                await locator.selectOption({ index: 1 });
-              });
-              break;
+          const inputTypeAttr = await locator.getAttribute('type').catch(() => null);
+          const isHidden = inputTypeAttr === 'hidden';
 
-            case 'checkbox':
-              if (valToFill === 'true' || valToFill === '1' || valToFill === 'checked' || !valToFill) {
-                await locator.check({ force: true });
-              } else {
-                await locator.uncheck({ force: true });
-              }
-              break;
+          if (isHidden) {
+            // Modern AJAX form dropdowns (MetForm, WPForms Pro) store selected values in hidden inputs
+            await locator.evaluate((el: HTMLInputElement, val: string) => {
+              el.value = val;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            }, valToFill);
+          } else {
+            switch (fieldType) {
+              case 'select':
+                await locator.selectOption(valToFill).catch(async () => {
+                  await locator.selectOption({ index: 1 }).catch(async () => {
+                    await locator.evaluate((el: HTMLSelectElement, val: string) => {
+                      if (el.options && el.options.length > 1) {
+                        el.selectedIndex = 1;
+                      } else {
+                        el.value = val;
+                      }
+                      el.dispatchEvent(new Event('change', { bubbles: true }));
+                    }, valToFill);
+                  });
+                });
+                break;
 
-            case 'textarea':
-            case 'text':
-            case 'email':
-            case 'tel':
-            default:
-              await locator.fill(valToFill, { timeout: 8000 });
-              break;
+              case 'checkbox':
+                if (valToFill === 'true' || valToFill === '1' || valToFill === 'checked' || !valToFill) {
+                  await locator.check({ force: true });
+                } else {
+                  await locator.uncheck({ force: true });
+                }
+                break;
+
+              case 'textarea':
+              case 'text':
+              case 'email':
+              case 'tel':
+              default:
+                await locator.fill(valToFill, { timeout: 8000 });
+                break;
+            }
           }
         } catch (fieldErr: any) {
           throw new Error(

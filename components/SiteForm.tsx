@@ -87,11 +87,38 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [isDetecting, setIsDetecting] = useState(false);
+  const [detectedFormsList, setDetectedFormsList] = useState<any[]>([]);
+  const [selectedFormIndex, setSelectedFormIndex] = useState<number | null>(null);
   const [testResult, setTestResult] = useState<any>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [presetNotice, setPresetNotice] = useState<string | null>(null);
 
-  // Auto-Detect form fields and selectors from live URL using Playwright
+  // Apply a selected detected form
+  const applyDetectedForm = (form: any, index: number) => {
+    setSelectedFormIndex(index);
+    if (form.detectedPlugin) {
+      setFormPluginType(form.detectedPlugin);
+    }
+    if (form.fields && form.fields.length > 0) {
+      setFields(form.fields);
+    }
+    if (form.submitButtonSelector) {
+      setSubmitButtonSelector(form.submitButtonSelector);
+    }
+    if (form.verificationMethod) {
+      setVerificationMethod(form.verificationMethod);
+    }
+    if (form.expectedSuccessValue) {
+      setExpectedSuccessValue(form.expectedSuccessValue);
+    }
+
+    setPresetNotice(
+      `✨ Loaded "${form.title || form.detectedPlugin}" with ${form.fields?.length || 0} input fields! Check the fields below to customize test values.`
+    );
+    setTimeout(() => setPresetNotice(null), 6000);
+  };
+
+  // Auto-Detect all form fields and selectors from live URL using Playwright
   const handleAutoDetect = async () => {
     if (!url.trim() || !url.startsWith('http')) {
       setErrorMsg('Please enter a valid page URL (starting with http:// or https://) first.');
@@ -100,6 +127,8 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
 
     setIsDetecting(true);
     setErrorMsg(null);
+    setDetectedFormsList([]);
+    setSelectedFormIndex(null);
 
     try {
       const res = await fetch('/api/sites/inspect-url', {
@@ -113,22 +142,15 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
         throw new Error(json.error || 'Failed to inspect page form.');
       }
 
-      const { data } = json;
-      if (data.detectedPlugin) {
-        setFormPluginType(data.detectedPlugin);
+      const forms = json.forms || (json.data ? [json.data] : []);
+      if (forms.length === 0) {
+        throw new Error('No forms detected on this page.');
       }
-      if (data.fields && data.fields.length > 0) {
-        setFields(data.fields);
-      }
-      if (data.submitButtonSelector) {
-        setSubmitButtonSelector(data.submitButtonSelector);
-      }
-      if (data.verificationMethod) {
-        setVerificationMethod(data.verificationMethod);
-      }
-      if (data.expectedSuccessValue) {
-        setExpectedSuccessValue(data.expectedSuccessValue);
-      }
+
+      setDetectedFormsList(forms);
+
+      // Auto-populate the first form immediately
+      applyDetectedForm(forms[0], 0);
 
       // Auto-suggest name from domain if empty
       if (!name.trim()) {
@@ -141,11 +163,6 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
           }
         } catch {}
       }
-
-      setPresetNotice(
-        `✨ Auto-detected ${data.detectedPlugin} with ${data.fields?.length || 0} fields from live page!`
-      );
-      setTimeout(() => setPresetNotice(null), 5000);
     } catch (detectErr: any) {
       setErrorMsg(detectErr.message || 'Auto-detection failed.');
     } finally {
@@ -396,6 +413,51 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
               onChange={(e) => setUrl(e.target.value)}
               className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-accent transition-colors"
             />
+
+            {/* Live Detected Forms Picker */}
+            {detectedFormsList.length > 0 && (
+              <div className="pt-2 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-sky-accent flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5" /> Detected Forms on this Page ({detectedFormsList.length})
+                  </span>
+                  <span className="text-[11px] text-slate-400">
+                    Click a form to populate its inputs & test values below
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {detectedFormsList.map((df, fIdx) => (
+                    <button
+                      key={df.id || fIdx}
+                      type="button"
+                      onClick={() => applyDetectedForm(df, fIdx)}
+                      className={`p-3 rounded-lg border text-left transition-all flex items-start justify-between gap-2 ${
+                        selectedFormIndex === fIdx
+                          ? 'bg-sky-accent/20 border-sky-accent text-white shadow-sm'
+                          : 'bg-navy-900 border-surface-border hover:border-slate-500 text-slate-300'
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-semibold text-slate-100">
+                            {df.title || `Form #${fIdx + 1}`}
+                          </span>
+                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-surface border border-surface-border text-slate-300">
+                            {df.detectedPlugin}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          {df.fields?.length || 0} inputs detected • Click to inspect & test
+                        </p>
+                      </div>
+                      {selectedFormIndex === fIdx && (
+                        <CheckCircle2 className="w-4 h-4 text-sky-accent shrink-0 mt-0.5" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="md:col-span-2 flex items-center gap-2 pt-1">

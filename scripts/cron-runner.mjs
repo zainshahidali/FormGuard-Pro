@@ -170,9 +170,24 @@ async function runFormTest(site) {
         const type = (field.type || 'text').toLowerCase();
         const testVal = field.testValue || 'Test Value';
 
-        if (type === 'select') {
+        const inputTypeAttr = await locator.getAttribute('type').catch(() => null);
+        const isHidden = inputTypeAttr === 'hidden';
+
+        if (isHidden) {
+          await locator.evaluate((el, val) => {
+            el.value = val;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          }, testVal);
+        } else if (type === 'select') {
           await locator.selectOption(testVal).catch(async () => {
-            await locator.selectOption({ index: 1 });
+            await locator.selectOption({ index: 1 }).catch(async () => {
+              await locator.evaluate((el, val) => {
+                if (el.options && el.options.length > 1) el.selectedIndex = 1;
+                else el.value = val;
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+              }, testVal);
+            });
           });
         } else if (type === 'checkbox') {
           if (testVal === 'true' || testVal === '1' || testVal === 'checked' || !testVal) {
