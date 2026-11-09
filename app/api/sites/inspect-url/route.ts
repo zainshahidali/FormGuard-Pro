@@ -2,7 +2,97 @@ import { NextRequest, NextResponse } from 'next/server';
 import { chromium, Browser, Page } from 'playwright';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60; // Allow sufficient time for multi-page crawling
+export const maxDuration = 120; // Allow sufficient time for multi-page crawling
+
+// Helper to discover all candidate URLs from sitemap and homepage
+async function discoverSiteCandidateUrls(baseUrl: string, page: Page): Promise<string[]> {
+  const origin = new URL(baseUrl).origin;
+  const discovered = new Set<string>([origin + '/']);
+
+  // 1. Try common WordPress XML sitemaps (RankMath, Yoast, Core WP)
+  const sitemapEndpoints = [
+    `${origin}/page-sitemap.xml`,
+    `${origin}/wp-sitemap-posts-page-1.xml`,
+    `${origin}/sitemap_index.xml`,
+    `${origin}/sitemap.xml`,
+  ];
+
+  for (const smUrl of sitemapEndpoints) {
+    try {
+      const res = await fetch(smUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 FormGuardPro/1.0' },
+        signal: AbortSignal.timeout(4000),
+      });
+      if (res.ok) {
+        const text = await res.text();
+        const matches = text.match(/<loc>(.*?)<\/loc>/g);
+        if (matches) {
+          matches.forEach((m) => {
+            const u = m.replace(/<\/?loc>/g, '').trim();
+            if (u.startsWith(origin) && !u.match(/\.(jpg|jpeg|png|gif|pdf|css|js|webp|svg|zip|xml)$/i)) {
+              discovered.add(u);
+            }
+          });
+        }
+        if (discovered.size > 5) break;
+      }
+    } catch {}
+  }
+
+  // 2. Also harvest links from page DOM
+  try {
+    const domLinks: string[] = await page.evaluate((orig) => {
+      return Array.from(document.querySelectorAll('a[href]'))
+        .map((a) => a.getAttribute('href') || '')
+        .filter(Boolean);
+    }, origin);
+
+    domLinks.forEach((href) => {
+      try {
+        const resolved = new URL(href, baseUrl);
+        if (resolved.origin === origin && !resolved.pathname.match(/\.(jpg|jpeg|png|gif|pdf|css|js|webp|svg|zip)$/i)) {
+          const clean = resolved.origin + resolved.pathname.replace(/\/$/, '') + (resolved.pathname.endsWith('/') ? '/' : '');
+          discovered.add(clean);
+        }
+      } catch {}
+    });
+  } catch {}
+
+  return Array.from(discovered);
+}
+
+// Smart priority sorting for pages likely to host forms across all business departments
+function selectPriorityPages(urls: string[], baseUrl: string): string[] {
+  const categories: Record<string, string[]> = {
+    contact: ['contact', 'reach', 'touch', 'hello', 'inquiry', 'enquiry'],
+    booking: ['book', 'booking', 'appointment', 'reserve', 'reservation', 'schedule'],
+    career: ['career', 'careers', 'job', 'jobs', 'join', 'hiring', 'work-with-us', 'apply'],
+    quote: ['quote', 'estimate', 'pricing', 'calculator', 'order'],
+    product: ['product', 'products', 'shop', 'package'],
+    service: ['service', 'services', 'treatment', 'treatments'],
+  };
+
+  const selected = new Set<string>([baseUrl.replace(/\/$/, '') + '/']);
+
+  // Pick top 1-2 pages from each high-value category
+  for (const [cat, kws] of Object.entries(categories)) {
+    const matches = urls.filter((u) => kws.some((k) => u.toLowerCase().includes(k)));
+    if (cat === 'product') {
+      // Prioritize single product detail pages (e.g. /products/face-neck-lifting-serum/)
+      const singleProduct = matches.find((m) => m.replace(/\/$/, '').split('/').length > 4);
+      if (singleProduct) selected.add(singleProduct);
+    }
+    matches.slice(0, 2).forEach((m) => selected.add(m));
+  }
+
+  // Fill up to 11 pages total with remaining URLs
+  for (const u of urls) {
+    if (selected.size >= 11) break;
+    selected.add(u);
+  }
+
+  return Array.from(selected);
+}
 
 // Helper to inspect forms on an individual loaded page
 async function extractFormsFromPage(page: Page, pageUrl: string) {
@@ -59,7 +149,7 @@ async function extractFormsFromPage(page: Page, pageUrl: string) {
       }
     });
 
-    const pageTitle = (document.title || '').split('|')[0].split('-')[0].trim() || 'Page';
+    const pageTitle = (document.title || '').split('|')[0].split(' – ')[0].split(' — ')[0].trim() || 'Page';
 
     const mapped = formContainers.map((container, index) => {
       if (isBlacklisted(container)) {
@@ -395,58 +485,29 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, forms, count: forms.length });
     }
 
-    // 2. Deep Multi-Page Crawl
-    const internalLinks: string[] = await page.evaluate((baseUrl) => {
-      const origin = new URL(baseUrl).origin;
-      const allLinks = Array.from(document.querySelectorAll('a[href]'));
-      const internal = new Set<string>();
-
-      allLinks.forEach((a) => {
-        try {
-          const u = new URL(a.getAttribute('href') || '', baseUrl);
-          if (
-            u.origin === origin &&
-            !u.pathname.match(/\.(jpg|jpeg|png|gif|pdf|css|js|webp|svg|zip)$/i)
-          ) {
-            const clean = u.origin + u.pathname.replace(/\/$/, '') + (u.pathname.endsWith('/') ? '/' : '');
-            internal.add(clean);
-          }
-        } catch {}
-      });
-
-      return Array.from(internal);
-    }, url);
-
-    // Prioritize contact, quote, estimate, inquiry, services pages first
-    const sortedLinks = internalLinks.sort((a, b) => {
-      const priorityKeywords = ['contact', 'quote', 'estimate', 'book', 'inquiry', 'request', 'services'];
-      const aPriority = priorityKeywords.some((k) => a.toLowerCase().includes(k)) ? 1 : 0;
-      const bPriority = priorityKeywords.some((k) => b.toLowerCase().includes(k)) ? 1 : 0;
-      return bPriority - aPriority;
-    });
-
-    // Check top 6 priority internal pages plus root
-    const uniquePages = Array.from(new Set([url, ...sortedLinks])).slice(0, 7);
+    // 2. Deep Multi-Page Crawl (Sitemap-assisted & multi-department prioritized)
+    const allDiscoveredCandidateUrls = await discoverSiteCandidateUrls(url, page);
+    const uniquePages = selectPriorityPages(allDiscoveredCandidateUrls, url);
 
     const allDiscoveredForms: any[] = [];
     const scannedUrls: string[] = [];
 
-    // Extract from first page
+    // Extract forms from root/homepage first
     const firstPageForms = await extractFormsFromPage(page, url);
     scannedUrls.push(url);
     if (firstPageForms && firstPageForms.length > 0) {
       allDiscoveredForms.push(...firstPageForms);
     }
 
-    // Crawl other pages
+    // Crawl prioritized pages across the entire site
     for (const pageUrl of uniquePages) {
       if (pageUrl === url) continue;
       try {
-        await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+        await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
         await page.waitForSelector('form, .metform-form-content, .elementor-form, .wpforms-container, .wpcf7-form', {
-          timeout: 6000,
+          timeout: 4000,
         }).catch(() => {});
-        await page.waitForTimeout(1200);
+        await page.waitForTimeout(600);
         scannedUrls.push(pageUrl);
         const formsOnPage = await extractFormsFromPage(page, pageUrl);
         if (formsOnPage && formsOnPage.length > 0) {
