@@ -20,3 +20,4 @@ export function getOrCreateDummyUploadImage(): string {
   }
   return filePath;
 }
+
