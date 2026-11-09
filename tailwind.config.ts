@@ -8,7 +8,19 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
+        display: ["Plus Jakarta Sans", "Inter", "ui-sans-serif", "system-ui", "sans-serif"],
+      },
       colors: {
+        ink: "#101c2e",
+        inksoft: "#1b2a42",
+        canvas: "#f4f6fa",
+        cobalt: "#3c56e8",
+        cobaltdark: "#2c43cc",
+        mint: "#0da88c",
+        line: "#e6eaf1",
+        muted: "#71809a",
         navy: {
           900: "#090D16",
           800: "#0F172A", // Primary Background / Sidebar

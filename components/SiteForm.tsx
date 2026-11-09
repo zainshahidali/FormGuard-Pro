@@ -1,40 +1,65 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import {
-  Save,
-  Plus,
-  Trash2,
-  Sparkles,
-  Play,
-  Loader2,
-  AlertCircle,
-  CheckCircle2,
-  HelpCircle,
+  ArrowRight,
   Bell,
-  Mail,
-  MessageSquare,
+  Check,
+  ChevronLeft,
+  Clock,
   Globe,
-  Settings,
   Layers,
-  CheckSquare,
-  Square,
-  ExternalLink,
-  ChevronRight,
+  Lightbulb,
+  Link2,
+  Mail,
+  Plus,
+  Radar,
+  RefreshCw,
+  Search,
+  Settings2,
+  ShieldCheck,
+  Sparkles,
+  Trash2,
+  Webhook,
+  X,
+  Play,
+  LoaderCircle,
+  AlertCircle,
+  CircleCheck,
 } from 'lucide-react';
 import { FORM_PRESETS } from '@/lib/presets';
 import { IFormField, IFormItem } from '@/models/Site';
+import { SectionCard, Toggle, FieldLabel, StatusPill, Toast, type Notice } from '@/components/ui';
 
 interface SiteFormProps {
   initialData?: any;
   isEditing?: boolean;
 }
 
+const UI_FIELD_TYPES = [
+  'Text',
+  'Tel',
+  'Email',
+  'Select',
+  'File / Image Upload',
+  'Textarea',
+  'Checkbox',
+] as const;
+
+type UiFieldType = typeof UI_FIELD_TYPES[number];
+
+const VERIFICATION_OPTIONS = [
+  { label: 'CSS Selector Appears (e.g. .success-msg)', value: 'selector_visible' },
+  { label: 'Text Appears on Page', value: 'text_visible' },
+  { label: 'URL Redirect / Thank You Page', value: 'url_redirect' },
+];
+
 export default function SiteForm({ initialData, isEditing = false }: SiteFormProps) {
   const router = useRouter();
 
-  // Helper to sanitize clean form name (strips any auto-generated page counts)
+  // Helper to sanitize clean form name
   const sanitizeName = (n: string) =>
     (n || '')
       .replace(/\s*\(Appears on \d+ pages?\)/gi, '')
@@ -42,14 +67,21 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
       .replace(/\s*\(Global.*?\)/gi, '')
       .trim();
 
-  // Basic Info
-  const [name, setName] = useState(initialData?.name || '');
-  const [url, setUrl] = useState(initialData?.url || '');
-  const [isActive, setIsActive] = useState<boolean>(
+  // Step 01: Website details & Crawler
+  const [siteName, setSiteName] = useState(initialData?.name || '');
+  const [siteUrl, setSiteUrl] = useState(initialData?.url || '');
+  const [activeMonitoring, setActiveMonitoring] = useState<boolean>(
     initialData?.isActive !== undefined ? initialData.isActive : true
   );
 
-  // Initialize Forms List (supports multi-form and legacy single-form sites; empty by default for new sites)
+  // Discovery Crawler state
+  const [scanMode, setScanMode] = useState<'idle' | 'page' | 'deep'>('idle');
+  const [scanProgress, setScanProgress] = useState(0);
+  const [lastScan, setLastScan] = useState<string | null>(null);
+  const [discoveredForms, setDiscoveredForms] = useState<any[]>([]);
+  const [selectedDiscovered, setSelectedDiscovered] = useState<Record<number, boolean>>({});
+
+  // Step 02: Monitored Forms List
   const initialFormsList: IFormItem[] =
     initialData?.forms && initialData.forms.length > 0
       ? initialData.forms.map((f: any) => ({ ...f, name: sanitizeName(f.name) }))
@@ -78,1141 +110,1202 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
   const [forms, setForms] = useState<IFormItem[]>(initialFormsList);
   const [activeFormIndex, setActiveFormIndex] = useState<number>(0);
 
-  // Notification Preferences
-  const [useGlobalDefaults, setUseGlobalDefaults] = useState(
-    initialData?.notificationPreferences?.useGlobalDefaults !== undefined
-      ? initialData.notificationPreferences.useGlobalDefaults
-      : true
-  );
-  const [enableEmail, setEnableEmail] = useState(
-    initialData?.notificationPreferences?.enableEmail !== undefined
-      ? initialData.notificationPreferences.enableEmail
-      : true
+  // Step 03: Alert & Notification routing
+  const [alertMode, setAlertMode] = useState<'global' | 'custom'>(
+    initialData?.notificationPreferences?.useGlobalDefaults === false ? 'custom' : 'global'
   );
   const [customEmails, setCustomEmails] = useState(
     initialData?.notificationPreferences?.customEmails?.join(', ') || ''
   );
-  const [enableSlack, setEnableSlack] = useState(
-    initialData?.notificationPreferences?.enableSlack !== undefined
-      ? initialData.notificationPreferences.enableSlack
-      : true
-  );
-  const [customSlackWebhookUrl, setCustomSlackWebhookUrl] = useState(
+  const [customWebhookUrl, setCustomWebhookUrl] = useState(
     initialData?.notificationPreferences?.customSlackWebhookUrl || ''
   );
   const [notifyOnSuccess, setNotifyOnSuccess] = useState(
     initialData?.notificationPreferences?.notifyOnSuccess || false
   );
 
-  // UI States
+  // Operation / Feedback states
   const [isSaving, setIsSaving] = useState(false);
-  const [isTesting, setIsTesting] = useState(false);
-  const [isDetecting, setIsDetecting] = useState(false);
-  const [detectMode, setDetectMode] = useState<'single' | 'deep' | null>(null);
-  const [detectedFormsList, setDetectedFormsList] = useState<any[]>([]);
-  const [checkedDiscoveredIndices, setCheckedDiscoveredIndices] = useState<Record<number, boolean>>({});
-  const [testResult, setTestResult] = useState<any>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [noticeMsg, setNoticeMsg] = useState<string | null>(null);
+  const [isTestingActiveForm, setIsTestingActiveForm] = useState(false);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const progressTimerRef = useRef<any>(null);
 
-  // Safe pointer to currently active form
-  const activeForm: IFormItem =
-    forms[activeFormIndex] ||
-    forms[0] || {
-      id: 'default',
-      name: 'Form',
-      pageUrl: url,
-      formPluginType: 'Custom',
-      fields: [],
-      submitButtonSelector: 'button[type="submit"]',
-      verificationMethod: 'text_visible',
-      expectedSuccessValue: 'Thank you',
-      isActive: true,
+  const notify = (message: string, tone: 'success' | 'info' | 'error' = 'success') => {
+    setNotice({ id: Date.now(), message, tone });
+  };
+
+  useEffect(() => {
+    return () => {
+      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
     };
+  }, []);
 
-  // Helper to show temporary flash notice
-  const flashNotice = (msg: string) => {
-    setNoticeMsg(msg);
-    setTimeout(() => setNoticeMsg(null), 5000);
+  // Active form pointer
+  const activeForm: IFormItem = forms[activeFormIndex] || {
+    id: 'default',
+    name: 'Primary Form',
+    pageUrl: siteUrl,
+    formPluginType: 'Contact Form 7',
+    fields: [],
+    submitButtonSelector: 'input[type="submit"]',
+    verificationMethod: 'selector_visible',
+    expectedSuccessValue: '.wpcf7-mail-sent-ok',
+    isActive: true,
   };
 
-  // Update a property of the currently active form
-  const updateActiveForm = (key: keyof IFormItem, value: any) => {
-    setForms((prevForms) => {
-      const updated = [...prevForms];
-      if (updated[activeFormIndex]) {
-        updated[activeFormIndex] = {
-          ...updated[activeFormIndex],
-          [key]: value,
-        };
+  // Type converters
+  const mapTypeToUi = (t: string): UiFieldType => {
+    switch (t) {
+      case 'file':
+        return 'File / Image Upload';
+      case 'tel':
+        return 'Tel';
+      case 'email':
+        return 'Email';
+      case 'select':
+        return 'Select';
+      case 'textarea':
+        return 'Textarea';
+      case 'checkbox':
+        return 'Checkbox';
+      default:
+        return 'Text';
+    }
+  };
+
+  const mapUiToType = (ui: UiFieldType): IFormField['type'] => {
+    switch (ui) {
+      case 'File / Image Upload':
+        return 'file';
+      case 'Tel':
+        return 'tel';
+      case 'Email':
+        return 'email';
+      case 'Select':
+        return 'select';
+      case 'Textarea':
+        return 'textarea';
+      case 'Checkbox':
+        return 'checkbox';
+      default:
+        return 'text';
+    }
+  };
+
+  // Form updates
+  const updateActiveForm = (patch: Partial<IFormItem>) => {
+    setForms((prev) => {
+      const copy = [...prev];
+      if (copy[activeFormIndex]) {
+        copy[activeFormIndex] = { ...copy[activeFormIndex], ...patch };
       }
-      return updated;
+      return copy;
     });
   };
 
-  // Apply a preset to the active form
-  const handleApplyPresetToActiveForm = (presetKey: string) => {
-    const preset = FORM_PRESETS[presetKey];
-    if (!preset) return;
-
-    setForms((prevForms) => {
-      const updated = [...prevForms];
-      if (updated[activeFormIndex]) {
-        updated[activeFormIndex] = {
-          ...updated[activeFormIndex],
-          formPluginType: preset.pluginType,
-          submitButtonSelector: preset.submitButtonSelector,
-          verificationMethod: preset.verificationMethod,
-          expectedSuccessValue: preset.expectedSuccessValue,
-          fields: [...preset.fields],
-        };
+  const updateActiveFormField = (fIdx: number, patch: Partial<IFormField>) => {
+    setForms((prev) => {
+      const copy = [...prev];
+      if (copy[activeFormIndex]) {
+        const curFields = [...(copy[activeFormIndex].fields || [])];
+        if (curFields[fIdx]) {
+          curFields[fIdx] = { ...curFields[fIdx], ...patch };
+          copy[activeFormIndex] = { ...copy[activeFormIndex], fields: curFields };
+        }
       }
-      return updated;
+      return copy;
     });
-
-    flashNotice(`Loaded presets for ${presetKey} into "${activeForm.name}"`);
   };
 
-  // Field Management for Active Form
-  const handleAddFieldToActiveForm = () => {
-    setForms((prevForms) => {
-      const updated = [...prevForms];
-      if (updated[activeFormIndex]) {
-        const curFields = updated[activeFormIndex].fields || [];
-        updated[activeFormIndex] = {
-          ...updated[activeFormIndex],
+  const addFieldToActiveForm = () => {
+    setForms((prev) => {
+      const copy = [...prev];
+      if (copy[activeFormIndex]) {
+        const curFields = copy[activeFormIndex].fields || [];
+        copy[activeFormIndex] = {
+          ...copy[activeFormIndex],
           fields: [
             ...curFields,
             {
               label: 'New Field',
               selector: 'input[name=""]',
               type: 'text',
-              testValue: '',
+              testValue: 'FormGuard QA Bot',
             },
           ],
         };
       }
-      return updated;
+      return copy;
     });
+    notify('New input row added — specify its CSS selector and test value.', 'info');
   };
 
-  const handleUpdateActiveFormField = (
-    fIdx: number,
-    key: keyof IFormField,
-    value: any
-  ) => {
-    setForms((prevForms) => {
-      const updated = [...prevForms];
-      if (updated[activeFormIndex]) {
-        const curFields = [...(updated[activeFormIndex].fields || [])];
-        if (curFields[fIdx]) {
-          const updatedField = { ...curFields[fIdx], [key]: value };
-          if (key === 'type' && value === 'file') {
-            if (!updatedField.testValue || updatedField.testValue === 'FormGuard QA Bot') {
-              updatedField.testValue = '[Dummy Black Image]';
-            }
-          }
-          curFields[fIdx] = updatedField;
-          updated[activeFormIndex] = {
-            ...updated[activeFormIndex],
-            fields: curFields,
-          };
-        }
-      }
-      return updated;
-    });
-  };
-
-  const handleRemoveActiveFormField = (fIdx: number) => {
-    setForms((prevForms) => {
-      const updated = [...prevForms];
-      if (updated[activeFormIndex]) {
-        const curFields = updated[activeFormIndex].fields || [];
-        updated[activeFormIndex] = {
-          ...updated[activeFormIndex],
+  const removeFieldFromActiveForm = (fIdx: number) => {
+    setForms((prev) => {
+      const copy = [...prev];
+      if (copy[activeFormIndex]) {
+        const curFields = copy[activeFormIndex].fields || [];
+        copy[activeFormIndex] = {
+          ...copy[activeFormIndex],
           fields: curFields.filter((_, i) => i !== fIdx),
         };
       }
-      return updated;
+      return copy;
     });
   };
 
-  // Add another form to the website manually
-  const handleAddNewForm = () => {
-    const newForm: IFormItem = {
+  const addNewForm = () => {
+    const defaultPreset = FORM_PRESETS['Contact Form 7'];
+    const newFormItem: IFormItem = {
       id: 'form-' + Math.random().toString(36).substring(2, 9),
       name: `Form #${forms.length + 1}`,
-      pageUrl: url || '',
-      formPluginType: 'Elementor Pro',
-      fields: [...FORM_PRESETS['Elementor Pro'].fields],
-      submitButtonSelector: FORM_PRESETS['Elementor Pro'].submitButtonSelector,
-      verificationMethod: FORM_PRESETS['Elementor Pro'].verificationMethod,
-      expectedSuccessValue: FORM_PRESETS['Elementor Pro'].expectedSuccessValue,
+      pageUrl: siteUrl || '',
+      formPluginType: 'Contact Form 7',
+      fields: [...defaultPreset.fields],
+      submitButtonSelector: defaultPreset.submitButtonSelector,
+      verificationMethod: defaultPreset.verificationMethod,
+      expectedSuccessValue: defaultPreset.expectedSuccessValue,
       isActive: true,
     };
-
-    setForms([...forms, newForm]);
+    setForms((prev) => [...prev, newFormItem]);
     setActiveFormIndex(forms.length);
-    flashNotice(`Added new blank form to "${name || 'Website'}".`);
+    notify('A new form was added. Configure its fields and selectors.', 'info');
   };
 
-  // Remove a form from the website
-  const handleDeleteForm = (indexToDelete: number) => {
+  const removeForm = (indexToDelete: number) => {
     if (forms.length <= 1) {
-      setErrorMsg('A website must have at least one monitored form.');
+      notify('A monitored website must have at least one active form.', 'error');
       return;
     }
-    const filtered = forms.filter((_, i) => i !== indexToDelete);
-    setForms(filtered);
-    if (activeFormIndex >= filtered.length) {
-      setActiveFormIndex(filtered.length - 1);
+    const next = forms.filter((_, i) => i !== indexToDelete);
+    setForms(next);
+    if (activeFormIndex >= next.length) {
+      setActiveFormIndex(next.length - 1);
     }
-    flashNotice('Form removed from website monitoring.');
+    notify('Form removed from website monitoring.', 'info');
   };
 
-  // Crawl & Detect Forms
-  const handleAutoDetect = async (isDeep: boolean = false) => {
-    if (!url.trim() || !url.startsWith('http')) {
-      setErrorMsg('Please enter a valid page or website URL (starting with http:// or https://) first.');
+  const applyPreset = (presetName: string) => {
+    const preset = FORM_PRESETS[presetName];
+    if (!preset) return;
+    updateActiveForm({
+      formPluginType: preset.pluginType,
+      submitButtonSelector: preset.submitButtonSelector,
+      verificationMethod: preset.verificationMethod,
+      expectedSuccessValue: preset.expectedSuccessValue,
+      fields: [...preset.fields],
+    });
+    notify(`${presetName} preset selectors and fields applied.`, 'info');
+  };
+
+  // Run Crawl & Auto-Detect
+  const startScan = async (mode: 'page' | 'deep') => {
+    if (!siteUrl.trim() || !siteUrl.startsWith('http')) {
+      notify('Please enter a valid website URL starting with http:// or https://', 'error');
       return;
     }
 
-    setIsDetecting(true);
-    setDetectMode(isDeep ? 'deep' : 'single');
-    setErrorMsg(null);
-    setDetectedFormsList([]);
-    setCheckedDiscoveredIndices({});
+    if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+    setScanMode(mode);
+    setScanProgress(10);
+
+    // Fake smooth animation while Playwright works
+    progressTimerRef.current = setInterval(() => {
+      setScanProgress((p) => {
+        if (p < 88) return p + (mode === 'deep' ? 3 : 7);
+        return p;
+      });
+    }, 280);
 
     try {
       const res = await fetch('/api/sites/inspect-url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim(), deepScan: isDeep }),
+        body: JSON.stringify({ url: siteUrl.trim(), deepScan: mode === 'deep' }),
       });
 
       const json = await res.json();
+      clearInterval(progressTimerRef.current);
+
       if (!res.ok || !json.success) {
         throw new Error(json.error || 'Failed to inspect website for forms.');
       }
 
+      setScanProgress(100);
       const discovered = json.forms || (json.data ? [json.data] : []);
-      if (discovered.length === 0) {
-        throw new Error('No forms detected on this website/page.');
-      }
+      setDiscoveredForms(discovered);
 
-      setDetectedFormsList(discovered);
-
-      // Default check forms that have at least 1 input
+      // Default all discovered forms to selected
       const initialChecked: Record<number, boolean> = {};
-      discovered.forEach((df: any, idx: number) => {
-        if (df.fields && df.fields.length > 0) {
-          initialChecked[idx] = true;
-        }
+      discovered.forEach((_: any, idx: number) => {
+        initialChecked[idx] = true;
       });
-      setCheckedDiscoveredIndices(initialChecked);
+      setSelectedDiscovered(initialChecked);
 
-      // Auto-suggest website name if empty
-      if (!name.trim()) {
-        try {
-          const parsedUrl = new URL(url.trim());
-          const hostParts = parsedUrl.hostname.replace('www.', '').split('.');
-          if (hostParts.length > 0) {
-            const derived = hostParts[0].charAt(0).toUpperCase() + hostParts[0].slice(1);
-            setName(derived);
-          }
-        } catch {}
+      setLastScan(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+
+      // Auto-set website name if empty
+      if (!siteName && json.siteTitle) {
+        setSiteName(json.siteTitle);
       }
 
-      // If website currently has no forms configured, auto-load the discovered forms directly into monitoring
-      if (forms.length === 0) {
-        const autoLoaded: IFormItem[] = discovered
-          .filter((df: any) => df.fields && df.fields.length > 0)
-          .map((df: any, i: number) => {
-            const cleanTitle = sanitizeName(df.title) || `${df.pageTitle || 'Page'} Form #${i + 1}`;
-            return {
-              id: df.id || 'form-' + Math.random().toString(36).substring(2, 9),
-              name: cleanTitle,
-              pageUrl: df.pageUrl || url,
-              formPluginType: df.detectedPlugin || 'Custom',
-              fields: df.fields || [],
-              submitButtonSelector: df.submitButtonSelector || 'button[type="submit"]',
-              verificationMethod: df.verificationMethod || 'text_visible',
-              expectedSuccessValue: df.expectedSuccessValue || 'Thank you',
-              isActive: true,
-            };
-          });
-
-        if (autoLoaded.length > 0) {
-          setForms(autoLoaded);
-          setActiveFormIndex(0);
-        }
-      }
-
-      flashNotice(`Discovered ${discovered.length} forms across the website! Forms loaded below for monitoring.`);
-    } catch (detectErr: any) {
-      setErrorMsg(detectErr.message || 'Auto-detection failed.');
+      notify(
+        mode === 'deep'
+          ? `Deep crawl complete — ${discovered.length} forms discovered across sitemaps & priority pages.`
+          : `Current page scanned — ${discovered.length} forms found.`,
+        'success'
+      );
+    } catch (err: any) {
+      clearInterval(progressTimerRef.current);
+      setScanProgress(0);
+      notify(err.message || 'Error occurred while scanning for forms.', 'error');
     } finally {
-      setIsDetecting(false);
-      setDetectMode(null);
+      setScanMode('idle');
     }
   };
 
-  // Toggle checkbox for a discovered form
-  const toggleDiscoveredCheck = (idx: number) => {
-    setCheckedDiscoveredIndices((prev) => ({
-      ...prev,
-      [idx]: !prev[idx],
-    }));
+  const toggleSelectAllDiscovered = () => {
+    const allSelected =
+      discoveredForms.length > 0 &&
+      discoveredForms.every((_, idx) => !!selectedDiscovered[idx]);
+
+    const next: Record<number, boolean> = {};
+    discoveredForms.forEach((_, idx) => {
+      next[idx] = !allSelected;
+    });
+    setSelectedDiscovered(next);
   };
 
-  // Import all checked discovered forms into the website
-  const handleImportCheckedForms = () => {
-    const selectedForms = detectedFormsList.filter((_, idx) => checkedDiscoveredIndices[idx]);
-
-    if (selectedForms.length === 0) {
-      setErrorMsg('Please select at least one form to import.');
+  const importSelectedForms = () => {
+    const chosen = discoveredForms.filter((_, idx) => !!selectedDiscovered[idx]);
+    if (!chosen.length) {
+      notify('Please select at least one discovered form to import.', 'error');
       return;
     }
 
-    const convertedForms: IFormItem[] = selectedForms.map((df, i) => {
-      const cleanTitle = sanitizeName(df.title) || `${df.pageTitle || 'Page'} Form #${i + 1}`;
+    const imported: IFormItem[] = chosen.map((df: any, idx: number) => {
+      const cleanName = sanitizeName(df.name || `Form #${idx + 1}`);
       return {
-        id: df.id || 'form-' + Math.random().toString(36).substring(2, 9),
-        name: cleanTitle,
-        pageUrl: df.pageUrl || url,
-        formPluginType: df.detectedPlugin || 'Custom',
-        fields: df.fields || [],
-        submitButtonSelector: df.submitButtonSelector || 'button[type="submit"]',
-        verificationMethod: df.verificationMethod || 'text_visible',
-        expectedSuccessValue: df.expectedSuccessValue || 'Thank you',
+        id: 'form-' + Math.random().toString(36).substring(2, 9),
+        name: cleanName,
+        pageUrl: df.pageUrl || siteUrl,
+        formPluginType: df.formPluginType || 'Contact Form 7',
+        fields: df.fields && df.fields.length > 0 ? df.fields : [...FORM_PRESETS['Contact Form 7'].fields],
+        submitButtonSelector: df.submitButtonSelector || 'input[type="submit"]',
+        verificationMethod: df.verificationMethod || 'selector_visible',
+        expectedSuccessValue: df.expectedSuccessValue || '.wpcf7-mail-sent-ok',
         isActive: true,
       };
     });
 
-    setForms(convertedForms);
+    setForms(imported);
     setActiveFormIndex(0);
-    setDetectedFormsList([]); // close the import drawer once imported
-    flashNotice(`Successfully imported ${convertedForms.length} forms into ${name || 'Website'}! You can customize each form's fields below.`);
+    notify(
+      `${imported.length} ${imported.length === 1 ? 'form' : 'forms'} imported into your active monitoring queue!`,
+      'success'
+    );
+
+    // Scroll to Step 02
+    setTimeout(() => {
+      document.getElementById('monitored-forms')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
   };
 
-  // Save Website with All Forms
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg(null);
-    setIsSaving(true);
-
-    try {
-      if (!name.trim()) throw new Error('Site name is required.');
-      if (!url.trim()) throw new Error('Website URL is required.');
-      if (forms.length === 0) throw new Error('At least one form must be added to the website.');
-
-      // Validate each form
-      for (let i = 0; i < forms.length; i++) {
-        const f = forms[i];
-        if (!f.name?.trim()) throw new Error(`Form #${i + 1} requires a name.`);
-        if (!f.pageUrl?.trim()) throw new Error(`Form "${f.name}" requires a page URL.`);
-        if (!f.submitButtonSelector?.trim())
-          throw new Error(`Form "${f.name}" requires a submit button selector.`);
-        if (!f.expectedSuccessValue?.trim())
-          throw new Error(`Form "${f.name}" requires an expected verification value.`);
-      }
-
-      const primaryForm = forms[0];
-
-      const payload = {
-        name: name.trim(),
-        url: url.trim(),
-        forms,
-        // Backward compatibility top-level fields:
-        formPluginType: primaryForm.formPluginType,
-        fields: primaryForm.fields,
-        submitButtonSelector: primaryForm.submitButtonSelector,
-        verificationMethod: primaryForm.verificationMethod,
-        expectedSuccessValue: primaryForm.expectedSuccessValue,
-        isActive,
-        notificationPreferences: {
-          useGlobalDefaults,
-          enableEmail,
-          customEmails: customEmails
-            .split(',')
-            .map((emailStr: string) => emailStr.trim())
-            .filter(Boolean),
-          enableSlack,
-          customSlackWebhookUrl: customSlackWebhookUrl.trim(),
-          notifyOnSuccess,
-        },
-      };
-
-      const endpoint = isEditing ? `/api/sites/${initialData._id}` : '/api/sites';
-      const method = isEditing ? 'PUT' : 'POST';
-
-      const res = await fetch(endpoint, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to save site configuration.');
-      }
-
-      router.push('/');
-      router.refresh();
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Error saving site.');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  // Immediate Test Run on Current Site
-  const handleTestNow = async () => {
-    if (!initialData?._id) {
-      setErrorMsg('Please save the website first before running a live test.');
+  // Test Active Form with Playwright
+  const handleTestActiveForm = async () => {
+    if (!activeForm.pageUrl || !activeForm.submitButtonSelector) {
+      notify('Active form requires a page URL and submit button selector.', 'error');
       return;
     }
 
-    setIsTesting(true);
-    setTestResult(null);
-    setErrorMsg(null);
+    setIsTestingActiveForm(true);
+    notify(`Testing "${activeForm.name}" with headless Playwright…`, 'info');
 
     try {
       const res = await fetch('/api/test/run-single', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: initialData._id }),
+        body: JSON.stringify({
+          tempConfig: {
+            name: siteName || 'Test Site',
+            url: siteUrl,
+            form: activeForm,
+          },
+        }),
       });
 
       const data = await res.json();
       if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Test run failed.');
+        throw new Error(data.error || 'Test execution failed.');
       }
 
-      setTestResult(data.result);
+      if (data.result.status === 'passed') {
+        notify(`✅ Passed: "${activeForm.name}" verified in ${data.result.durationMs}ms!`, 'success');
+      } else {
+        notify(`🚨 Failed: "${activeForm.name}" — ${data.result.errorMessage}`, 'error');
+      }
     } catch (err: any) {
-      setErrorMsg(err.message || 'Test execution failed.');
+      notify(err.message || 'Form test failed to run.', 'error');
     } finally {
-      setIsTesting(false);
+      setIsTestingActiveForm(false);
     }
   };
 
+  // Save Site & All Forms
+  const handleSave = async () => {
+    if (!siteName.trim()) {
+      notify('Client website name is required.', 'error');
+      return;
+    }
+    if (!siteUrl.trim() || !siteUrl.startsWith('http')) {
+      notify('Target website URL is required (must start with http:// or https://).', 'error');
+      return;
+    }
+    if (!forms.length) {
+      notify('Please configure at least one form to monitor.', 'error');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const payload = {
+        name: siteName.trim(),
+        url: siteUrl.trim(),
+        isActive: activeMonitoring,
+        forms: forms.map((f) => ({
+          ...f,
+          name: sanitizeName(f.name),
+        })),
+        notificationPreferences: {
+          useGlobalDefaults: alertMode === 'global',
+          enableEmail: alertMode === 'custom' ? !!customEmails.trim() : true,
+          customEmails:
+            alertMode === 'custom'
+              ? customEmails
+                  .split(',')
+                  .map((e: string) => e.trim())
+                  .filter(Boolean)
+              : [],
+          enableSlack: alertMode === 'custom' ? !!customWebhookUrl.trim() : true,
+          customSlackWebhookUrl: alertMode === 'custom' ? customWebhookUrl.trim() : '',
+          notifyOnSuccess,
+        },
+      };
+
+      const urlToCall = isEditing ? `/api/sites/${initialData._id}` : '/api/sites';
+      const methodToCall = isEditing ? 'PUT' : 'POST';
+
+      const res = await fetch(urlToCall, {
+        method: methodToCall,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'Failed to save website configuration.');
+      }
+
+      notify(
+        `Website "${siteName}" saved successfully with ${forms.length} monitored ${
+          forms.length === 1 ? 'form' : 'forms'
+        }!`,
+        'success'
+      );
+
+      setTimeout(() => {
+        router.push('/');
+        router.refresh();
+      }, 700);
+    } catch (err: any) {
+      notify(err.message || 'Failed to save website.', 'error');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const selectedDiscoveredCount = Object.values(selectedDiscovered).filter(Boolean).length;
+  const allDiscoveredSelected =
+    discoveredForms.length > 0 && selectedDiscoveredCount === discoveredForms.length;
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-8 max-w-5xl mx-auto pb-16">
-      {/* Notifications / Error Banner */}
-      {errorMsg && (
-        <div className="p-4 rounded-xl bg-red-950/60 border border-red-800 text-red-200 flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
-          <div className="text-sm">
-            <span className="font-semibold block">Configuration Error</span>
-            <span className="text-xs opacity-90">{errorMsg}</span>
-          </div>
-        </div>
-      )}
-
-      {noticeMsg && (
-        <div className="p-4 rounded-xl bg-sky-950/60 border border-sky-800 text-sky-200 flex items-center gap-3 animate-in fade-in duration-300">
-          <Sparkles className="w-5 h-5 text-sky-400 shrink-0" />
-          <span className="text-sm font-medium">{noticeMsg}</span>
-        </div>
-      )}
-
-      {/* SECTION 1: Website General Details & Deep Multi-Page Scanner */}
-      <div className="bg-surface border border-surface-border rounded-xl p-6 space-y-6">
-        <div>
-          <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-            <Globe className="w-5 h-5 text-sky-accent" /> Website Information & Multi-Form Crawler
-          </h2>
-          <p className="text-xs text-slate-400 mt-1">
-            Specify the client website. FormGuard Pro will automatically crawl internal pages (Contact, Quote, Services) to find and test all forms.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-300">
-              Client Website Name <span className="text-red-400">*</span>
-            </label>
-            <input
-              type="text"
-              required
-              placeholder="e.g. Skin Creation or Extreme Roofing"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-accent transition-colors"
-            />
-          </div>
-
-          <div className="space-y-1.5 flex flex-col justify-end">
-            <div className="flex items-center gap-2 pb-2">
-              <input
-                type="checkbox"
-                id="isActive"
-                checked={isActive}
-                onChange={(e) => setIsActive(e.target.checked)}
-                className="w-4 h-4 rounded border-surface-border text-sky-accent focus:ring-0 bg-navy-800 cursor-pointer"
-              />
-              <label htmlFor="isActive" className="text-xs text-slate-300 cursor-pointer select-none">
-                Active Daily Website Monitoring (include all forms in daily cron runs)
-              </label>
-            </div>
-          </div>
-
-          <div className="md:col-span-2 space-y-1.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <label className="text-xs font-medium text-slate-300">
-                Target Website URL (Homepage or Form Page) <span className="text-red-400">*</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleAutoDetect(false)}
-                  disabled={isDetecting || !url.trim()}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-semibold text-slate-300 bg-navy-800 hover:bg-surface-hover border border-surface-border transition-all disabled:opacity-40"
-                  title="Scan only the specific URL entered below"
-                >
-                  {isDetecting && detectMode === 'single' ? (
-                    <>
-                      <Loader2 className="w-3 h-3 animate-spin text-sky-accent" /> Scanning Page...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-3 h-3 text-sky-accent" /> Scan Current Page
-                    </>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleAutoDetect(true)}
-                  disabled={isDetecting || !url.trim()}
-                  className="flex items-center gap-1.5 px-3 py-1 rounded text-[11px] font-semibold text-white bg-gradient-to-r from-sky-accent/80 to-teal-light/80 hover:from-sky-accent hover:to-teal-light border border-sky-accent/40 shadow-sm transition-all disabled:opacity-40"
-                  title="Crawl internal pages (Contact, Quote, Services) to find all forms on the entire site"
-                >
-                  {isDetecting && detectMode === 'deep' ? (
-                    <>
-                      <Loader2 className="w-3 h-3 animate-spin text-white" /> Crawling All Pages...
-                    </>
-                  ) : (
-                    <>
-                      <Globe className="w-3.5 h-3.5 text-white" /> 🌐 Deep Crawl Entire Website
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-            <input
-              type="url"
-              required
-              placeholder="https://example.com/ (Enter homepage URL)"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-accent transition-colors"
-            />
-            <p className="text-[11px] text-slate-400">
-              💡 Tip: Enter the homepage URL and click <strong>&quot;Deep Crawl Entire Website&quot;</strong>. FormGuard will crawl all sub-pages and allow you to monitor all client contact forms in 1 click!
-            </p>
-
-            {/* Live Detected Forms Checklist Drawer */}
-            {detectedFormsList.length > 0 && (
-              <div className="pt-3 p-4 bg-navy-950 border border-sky-accent/30 rounded-xl space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-surface-border pb-2.5">
-                  <div>
-                    <span className="text-xs font-bold text-sky-accent flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5" /> Discovered Forms across Website ({detectedFormsList.length})
-                    </span>
-                    <p className="text-[11px] text-slate-400">
-                      Check the forms you want to monitor, then click &quot;Import Selected Forms&quot;.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleImportCheckedForms}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-navy-900 bg-sky-accent hover:bg-sky-400 shadow transition-all"
-                  >
-                    <Plus className="w-3.5 h-3.5 stroke-[3]" /> Import Selected Forms (
-                    {Object.values(checkedDiscoveredIndices).filter(Boolean).length})
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-72 overflow-y-auto pr-1">
-                  {detectedFormsList.map((df, fIdx) => {
-                    const isChecked = !!checkedDiscoveredIndices[fIdx];
-                    return (
-                      <div
-                        key={df.id || fIdx}
-                        onClick={() => toggleDiscoveredCheck(fIdx)}
-                        className={`p-3 rounded-lg border text-left cursor-pointer transition-all flex items-start gap-2.5 ${
-                          isChecked
-                            ? 'bg-sky-accent/15 border-sky-accent text-white shadow-sm'
-                            : 'bg-navy-900/60 border-surface-border text-slate-400 opacity-75 hover:opacity-100'
-                        }`}
-                      >
-                        <div className="pt-0.5 shrink-0">
-                          {isChecked ? (
-                            <CheckSquare className="w-4 h-4 text-sky-accent" />
-                          ) : (
-                            <Square className="w-4 h-4 text-slate-500" />
-                          )}
-                        </div>
-
-                        <div className="space-y-0.5 overflow-hidden flex-1">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="text-xs font-bold text-white truncate max-w-[200px]">
-                              {df.title || `Form #${fIdx + 1}`}
-                            </span>
-                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-surface border border-surface-border text-sky-accent font-medium">
-                              {df.detectedPlugin}
-                            </span>
-                            {df.occurrences && df.occurrences > 1 && (
-                              <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 font-medium">
-                                Shared across {df.occurrences} pages
-                              </span>
-                            )}
-                          </div>
-
-                          {df.pageTitle && (
-                            <div className="text-[11px] text-teal-light font-medium truncate">
-                              📄 {df.pageTitle}
-                            </div>
-                          )}
-
-                          {df.pageUrl && (
-                            <div className="text-[10px] text-slate-400 truncate max-w-[280px]">
-                              🔗 {df.pageUrl}
-                            </div>
-                          )}
-
-                          <div className="text-[10px] text-slate-300 pt-0.5">
-                            <strong>{df.fields?.length || 0} inputs:</strong>{' '}
-                            {df.fields?.map((f: any) => f.label).filter(Boolean).slice(0, 4).join(', ')}
-                            {df.fields?.length > 4 ? '...' : ''}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* SECTION 2: Monitored Forms Manager (Hierarchical Multi-Form) */}
-      {forms.length > 0 ? (
-        <div className="bg-surface border border-surface-border rounded-xl p-6 space-y-6 animate-in fade-in duration-300">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="canvas-glow min-h-full">
+      <div className="mx-auto w-full max-w-[1130px] px-4 pb-12 pt-7 sm:px-7 lg:px-9">
+        {/* Page Hero */}
+        <div className="mb-7 flex flex-wrap items-start justify-between gap-5">
+          <div className="flex items-start gap-3">
+            <Link
+              href="/"
+              aria-label="Back to dashboard"
+              className="mt-1 grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-line bg-white text-[#64748b] shadow-sm transition hover:border-[#c3cde3] hover:text-cobalt"
+            >
+              <ChevronLeft size={17} />
+            </Link>
             <div>
-              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                <Layers className="w-5 h-5 text-teal-light" /> Monitored Forms on this Website ({forms.length})
-              </h2>
-              <p className="text-xs text-slate-400 mt-1">
-                All active forms below will be filled and tested during daily monitoring or when you click &quot;Test Now&quot;.
+              <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-[#8a97ad]">
+                <Link href="/" className="hover:text-cobalt transition-colors">Websites</Link>
+                <span className="text-[#c2cbdc]">/</span>
+                <span className="text-cobalt">{isEditing ? 'Edit site' : 'New site'}</span>
+              </div>
+              <h1 className="font-display text-[26px] font-extrabold leading-tight tracking-[-.035em] text-ink sm:text-[32px]">
+                {isEditing ? `Edit: ${initialData?.name || 'WordPress Site'}` : 'Add WordPress site'}
+              </h1>
+              <p className="mt-1.5 max-w-xl text-[13px] leading-relaxed text-muted">
+                Crawl the site, configure form selectors and submission triggers, then choose where failures are reported.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={handleAddNewForm}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-navy-800 text-sky-accent border border-surface-border hover:bg-surface-hover transition-colors"
-            >
-              <Plus className="w-3.5 h-3.5" /> Add Another Form to Website
-            </button>
           </div>
 
-          {/* Tab Strip to switch between forms */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 border-b border-surface-border">
-            {forms.map((formItem, idx) => {
-              const isActiveTab = activeFormIndex === idx;
-              return (
-                <div
-                  key={formItem.id || idx}
-                  onClick={() => setActiveFormIndex(idx)}
-                  className={`flex items-center gap-2 px-3.5 py-2 rounded-t-lg border-t border-x cursor-pointer text-xs font-semibold transition-all shrink-0 ${
-                    isActiveTab
-                      ? 'bg-navy-900 border-sky-accent text-white shadow-sm'
-                      : 'bg-navy-800/60 border-surface-border text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <span className="flex items-center gap-1.5">
-                    <span
-                      className={`w-2 h-2 rounded-full ${
-                        formItem.isActive ? 'bg-emerald-400' : 'bg-slate-500'
-                      }`}
-                    />
-                    {formItem.name || `Form #${idx + 1}`}
-                  </span>
-
-                  <span className="text-[10px] px-1 py-0.2 rounded bg-surface border border-surface-border text-slate-400">
-                    {formItem.fields?.length || 0} inputs
-                  </span>
-
-                  {forms.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteForm(idx);
-                      }}
-                      className="p-1 hover:text-red-400 rounded transition-colors ml-1"
-                      title="Remove this form from website"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Active Form Settings Panel */}
-          <div className="bg-navy-900 border border-surface-border rounded-xl p-5 space-y-5">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-surface-border pb-3">
-              <span className="text-xs font-bold text-sky-accent uppercase tracking-wider flex items-center gap-1.5">
-                <Settings className="w-3.5 h-3.5" /> Editing Settings for: &quot;{activeForm.name}&quot;
-              </span>
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="activeFormToggle"
-                  checked={activeForm.isActive !== false}
-                  onChange={(e) => updateActiveForm('isActive', e.target.checked)}
-                  className="w-4 h-4 rounded border-surface-border text-sky-accent focus:ring-0 bg-navy-800 cursor-pointer"
-                />
-                <label htmlFor="activeFormToggle" className="text-xs text-slate-300 cursor-pointer select-none">
-                  Enable daily testing for this form
-                </label>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-300">
-                  Form Name / Label <span className="text-red-400">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Contact Us Form"
-                  value={activeForm.name}
-                  onChange={(e) => updateActiveForm('name', e.target.value)}
-                  className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-sky-accent transition-colors"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-300">
-                  Form Plugin Type
-                </label>
-                <select
-                  value={activeForm.formPluginType}
-                  onChange={(e) => updateActiveForm('formPluginType', e.target.value)}
-                  className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-sky-accent transition-colors"
-                >
-                  <option value="Elementor Pro">Elementor Pro</option>
-                  <option value="Contact Form 7">Contact Form 7</option>
-                  <option value="MetForm">MetForm</option>
-                  <option value="WPForms">WPForms</option>
-                  <option value="Gravity Forms">Gravity Forms</option>
-                  <option value="Custom">Custom / Other</option>
-                </select>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-300">
-                  Exact Page URL where Form Lives <span className="text-red-400">*</span>
-                </label>
-                <input
-                  type="url"
-                  required
-                  placeholder="https://example.com/contact-us"
-                  value={activeForm.pageUrl}
-                  onChange={(e) => updateActiveForm('pageUrl', e.target.value)}
-                  className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-sky-accent transition-colors"
-                />
-              </div>
-            </div>
-
-            {/* Quick Preset loader for this specific form */}
-            <div className="pt-1 flex items-center gap-2 flex-wrap text-xs text-slate-400">
-              <span>Apply Preset to this form:</span>
-              {Object.keys(FORM_PRESETS).map((pKey) => (
-                <button
-                  key={pKey}
-                  type="button"
-                  onClick={() => handleApplyPresetToActiveForm(pKey)}
-                  className="px-2 py-0.5 rounded bg-navy-800 border border-surface-border hover:border-sky-accent text-slate-300 text-[11px] transition-colors"
-                >
-                  {pKey}
-                </button>
-              ))}
-            </div>
-
-            {/* Form Fields Builder for Active Form */}
-            <div className="pt-2 space-y-3">
-              <div className="flex items-center justify-between border-t border-surface-border pt-4">
-                <div>
-                  <h3 className="text-sm font-semibold text-white">Form Inputs & Test Values</h3>
-                  <p className="text-[11px] text-slate-400">
-                    Inputs that Playwright will automatically fill or select for this form.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleAddFieldToActiveForm}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium bg-navy-800 text-sky-accent border border-surface-border hover:bg-surface-hover transition-colors"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Add Input Field
-                </button>
-              </div>
-
-              <div className="space-y-2.5">
-                {activeForm.fields && activeForm.fields.length > 0 ? (
-                  activeForm.fields.map((field, fIdx) => (
-                    <div
-                      key={fIdx}
-                      className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 bg-navy-800/80 border border-surface-border p-3 rounded-lg items-center"
-                    >
-                      <div className="sm:col-span-3">
-                        <label className="text-[10px] text-slate-400 block mb-0.5 uppercase tracking-wider font-semibold">
-                          Label
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="e.g. Your Name"
-                          value={field.label}
-                          onChange={(e) => handleUpdateActiveFormField(fIdx, 'label', e.target.value)}
-                          className="w-full bg-navy-900 border border-surface-border rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-sky-accent"
-                        />
-                      </div>
-
-                      <div className="sm:col-span-4">
-                        <label className="text-[10px] text-slate-400 block mb-0.5 uppercase tracking-wider font-semibold">
-                          CSS Selector
-                        </label>
-                        <input
-                          type="text"
-                          placeholder='input[name="your-name"]'
-                          value={field.selector}
-                          onChange={(e) => handleUpdateActiveFormField(fIdx, 'selector', e.target.value)}
-                          className="w-full bg-navy-900 border border-surface-border rounded px-2.5 py-1.5 text-xs font-mono text-sky-accent focus:outline-none focus:border-sky-accent"
-                        />
-                      </div>
-
-                      <div className="sm:col-span-2">
-                        <label className="text-[10px] text-slate-400 block mb-0.5 uppercase tracking-wider font-semibold">
-                          Type
-                        </label>
-                        <select
-                          value={field.type}
-                          onChange={(e) => handleUpdateActiveFormField(fIdx, 'type', e.target.value)}
-                          className="w-full bg-navy-900 border border-surface-border rounded px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-sky-accent"
-                        >
-                          <option value="text">Text</option>
-                          <option value="email">Email</option>
-                          <option value="tel">Tel</option>
-                          <option value="textarea">Textarea</option>
-                          <option value="select">Select</option>
-                          <option value="checkbox">Checkbox</option>
-                          <option value="file">File / Image Upload</option>
-                        </select>
-                      </div>
-
-                      <div className="sm:col-span-2">
-                        <label className="text-[10px] text-slate-400 block mb-0.5 uppercase tracking-wider font-semibold">
-                          Test Value
-                        </label>
-                        <input
-                          type="text"
-                          placeholder={field.type === 'file' ? '[Dummy Black Image]' : 'Value to fill'}
-                          value={field.testValue}
-                          onChange={(e) => handleUpdateActiveFormField(fIdx, 'testValue', e.target.value)}
-                          className={`w-full bg-navy-900 border border-surface-border rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-sky-accent ${
-                            field.type === 'file' ? 'text-teal-400 font-mono text-[11px]' : ''
-                          }`}
-                        />
-                      </div>
-
-                      <div className="sm:col-span-1 flex justify-end pt-3 sm:pt-0">
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveActiveFormField(fIdx)}
-                          className="p-1.5 text-slate-400 hover:text-red-400 rounded hover:bg-navy-900 transition-colors"
-                          title="Remove field"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-center py-6 border border-dashed border-surface-border rounded-lg text-slate-500 text-xs">
-                    No input fields configured yet. Click &quot;Add Input Field&quot; or choose a preset above.
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Submission & Verification for Active Form */}
-            <div className="border-t border-surface-border pt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-300">
-                  Submit Button Selector <span className="text-red-400">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder='button[type="submit"]'
-                  value={activeForm.submitButtonSelector}
-                  onChange={(e) => updateActiveForm('submitButtonSelector', e.target.value)}
-                  className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-xs font-mono text-slate-100 focus:outline-none focus:border-sky-accent transition-colors"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-300">
-                  Verification Method
-                </label>
-                <select
-                  value={activeForm.verificationMethod}
-                  onChange={(e) => updateActiveForm('verificationMethod', e.target.value)}
-                  className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-sky-accent transition-colors"
-                >
-                  <option value="text_visible">Text Appears on Page</option>
-                  <option value="selector_visible">CSS Selector Appears (e.g. .success-msg)</option>
-                  <option value="url_redirect">URL Redirects to (Thank You Page)</option>
-                </select>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-300">
-                  Expected Success Value <span className="text-red-400">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Thank you for your message"
-                  value={activeForm.expectedSuccessValue}
-                  onChange={(e) => updateActiveForm('expectedSuccessValue', e.target.value)}
-                  className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-sky-accent transition-colors"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : (
-        /* Empty State: Hidden by default until website URL is provided and crawled */
-        <div className="bg-surface/50 border border-dashed border-surface-border rounded-xl p-8 text-center space-y-3">
-          <div className="w-12 h-12 rounded-full bg-navy-800 border border-surface-border flex items-center justify-center text-sky-accent mx-auto">
-            <Sparkles className="w-6 h-6" />
-          </div>
-          <div>
-            <h3 className="text-sm font-semibold text-white">Forms Will Appear Here Once Scanned</h3>
-            <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
-              Enter your website URL above and click <strong>&quot;🌐 Deep Crawl Entire Website&quot;</strong> or <strong>&quot;Scan Current Page&quot;</strong>. FormGuard Pro will automatically discover and load all client contact forms here for testing.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={handleAddNewForm}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-navy-800 hover:bg-surface-hover border border-surface-border transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5 text-sky-accent" /> Or Configure a Form Manually
-          </button>
-        </div>
-      )}
-
-      {/* SECTION 3: Notification Preferences */}
-      <div className="bg-surface border border-surface-border rounded-xl p-6 space-y-6">
-        <div>
-          <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-            <Bell className="w-5 h-5 text-sky-accent" /> Alert & Notification Routing
-          </h2>
-          <p className="text-xs text-slate-400 mt-1">
-            Choose where failure alerts (and screenshots) are sent if any form on this website breaks.
-          </p>
-        </div>
-
-        <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              id="useGlobalDefaults"
-              checked={useGlobalDefaults}
-              onChange={(e) => setUseGlobalDefaults(e.target.checked)}
-              className="w-4 h-4 rounded border-surface-border text-sky-accent focus:ring-0 bg-navy-800 cursor-pointer"
-            />
-            <label htmlFor="useGlobalDefaults" className="text-sm font-medium text-slate-200 cursor-pointer select-none">
-              Use Global Notification Defaults (Configured in Settings)
-            </label>
-          </div>
-
-          {!useGlobalDefaults && (
-            <div className="p-4 rounded-xl bg-navy-800/80 border border-surface-border space-y-4 animate-in fade-in duration-200">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="enableEmail"
-                      checked={enableEmail}
-                      onChange={(e) => setEnableEmail(e.target.checked)}
-                      className="w-4 h-4 rounded border-surface-border text-sky-accent focus:ring-0 bg-navy-900 cursor-pointer"
-                    />
-                    <label htmlFor="enableEmail" className="text-xs font-semibold text-slate-300 flex items-center gap-1.5 cursor-pointer">
-                      <Mail className="w-3.5 h-3.5 text-sky-accent" /> Enable Custom Email Alerts
-                    </label>
-                  </div>
-                  <input
-                    type="text"
-                    disabled={!enableEmail}
-                    placeholder="client-support@agency.com, alerts@site.com"
-                    value={customEmails}
-                    onChange={(e) => setCustomEmails(e.target.value)}
-                    className="w-full bg-navy-900 border border-surface-border rounded-lg px-3 py-2 text-xs text-slate-100 disabled:opacity-40 focus:outline-none focus:border-sky-accent"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="enableSlack"
-                      checked={enableSlack}
-                      onChange={(e) => setEnableSlack(e.target.checked)}
-                      className="w-4 h-4 rounded border-surface-border text-sky-accent focus:ring-0 bg-navy-900 cursor-pointer"
-                    />
-                    <label htmlFor="enableSlack" className="text-xs font-semibold text-slate-300 flex items-center gap-1.5 cursor-pointer">
-                      <MessageSquare className="w-3.5 h-3.5 text-amber-400" /> Enable Custom Slack Webhook
-                    </label>
-                  </div>
-                  <input
-                    type="url"
-                    disabled={!enableSlack}
-                    placeholder="https://hooks.slack.com/services/..."
-                    value={customSlackWebhookUrl}
-                    onChange={(e) => setCustomSlackWebhookUrl(e.target.value)}
-                    className="w-full bg-navy-900 border border-surface-border rounded-lg px-3 py-2 text-xs text-slate-100 disabled:opacity-40 focus:outline-none focus:border-sky-accent"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="flex items-center gap-2 pt-1">
-            <input
-              type="checkbox"
-              id="notifyOnSuccess"
-              checked={notifyOnSuccess}
-              onChange={(e) => setNotifyOnSuccess(e.target.checked)}
-              className="w-4 h-4 rounded border-surface-border text-sky-accent focus:ring-0 bg-navy-800 cursor-pointer"
-            />
-            <label htmlFor="notifyOnSuccess" className="text-xs text-slate-400 cursor-pointer select-none">
-              Notify on passed tests as well (Default: only alert on form failures)
-            </label>
-          </div>
-        </div>
-      </div>
-
-      {/* ACTION BAR: Save & Immediate Test */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-surface-border">
-        {isEditing && (
-          <button
-            type="button"
-            onClick={handleTestNow}
-            disabled={isTesting || isSaving}
-            className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold bg-navy-800 hover:bg-surface-hover text-sky-accent border border-sky-accent/30 shadow transition-all disabled:opacity-50"
-          >
-            {isTesting ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin text-sky-accent" /> Testing All Forms...
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4 fill-sky-accent text-sky-accent" /> Test All {forms.length} Forms Now
-              </>
-            )}
-          </button>
-        )}
-
-        <div className="flex items-center gap-3 w-full sm:w-auto justify-end ml-auto">
-          <button
-            type="button"
-            onClick={() => router.push('/')}
-            className="px-4 py-2.5 rounded-lg text-xs font-medium text-slate-400 hover:text-white border border-surface-border bg-navy-800 hover:bg-surface-hover transition-colors"
-          >
-            Cancel
-          </button>
-
-          <button
-            type="submit"
-            disabled={isSaving || isTesting}
-            className="flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg text-xs font-bold text-navy-900 bg-gradient-to-r from-sky-accent to-teal-light hover:brightness-110 shadow-lg shadow-sky-accent/20 transition-all disabled:opacity-50"
-          >
-            {isSaving ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" /> Saving Website...
-              </>
-            ) : (
-              <>
-                <Save className="w-4 h-4 stroke-[2.5]" /> Save Website & All {forms.length} Forms
-              </>
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* Live Inline Test Result Modal / Banner if tested */}
-      {testResult && (
-        <div
-          className={`p-5 rounded-xl border space-y-3 ${
-            testResult.status === 'passed'
-              ? 'bg-emerald-950/40 border-emerald-800 text-emerald-100'
-              : 'bg-red-950/40 border-red-800 text-red-100'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className="font-bold text-sm flex items-center gap-2">
-              {testResult.status === 'passed' ? (
-                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-              ) : (
-                <AlertCircle className="w-5 h-5 text-red-400" />
-              )}
-              Live Multi-Form Test Result: {testResult.status.toUpperCase()} ({testResult.durationMs}ms)
-            </span>
-            <span className="text-xs opacity-75">
-              {testResult.formResults?.filter((fr: any) => fr.status === 'passed').length}/
-              {testResult.formResults?.length || 1} forms passed
-            </span>
-          </div>
-
-          {testResult.formResults && testResult.formResults.length > 0 && (
-            <div className="space-y-1.5 pt-2">
-              {testResult.formResults.map((fr: any, idx: number) => (
-                <div
-                  key={idx}
-                  className="flex items-center justify-between p-2 rounded bg-navy-900/60 border border-surface-border text-xs"
-                >
-                  <span className="font-medium text-white">{fr.formName}</span>
+          {/* 3-Step Indicator */}
+          <div className="panel flex items-center gap-3 px-4 py-3">
+            {[
+              { n: '01', label: 'Discover' },
+              { n: '02', label: 'Configure' },
+              { n: '03', label: 'Alerts' },
+            ].map((step, i) => (
+              <div key={step.n} className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
                   <span
-                    className={`font-bold text-[10px] px-2 py-0.5 rounded ${
-                      fr.status === 'passed'
-                        ? 'bg-emerald-500/20 text-emerald-400'
-                        : 'bg-red-500/20 text-red-400'
+                    className={`grid h-6 w-6 place-items-center rounded-full text-[10px] font-bold ${
+                      forms.length > 0 && i === 0
+                        ? 'bg-[#e7f8f2] text-mint'
+                        : i === 1
+                        ? 'bg-cobalt text-white'
+                        : 'bg-[#eef1ff] text-cobalt'
                     }`}
                   >
-                    {fr.status.toUpperCase()} ({fr.durationMs}ms)
+                    {forms.length > 0 && i === 0 ? <Check size={12} strokeWidth={3} /> : step.n}
+                  </span>
+                  <span
+                    className={`hidden text-[11.5px] font-semibold sm:block ${
+                      i === 1 ? 'text-ink' : 'text-[#98a4b8]'
+                    }`}
+                  >
+                    {step.label}
                   </span>
                 </div>
-              ))}
-            </div>
-          )}
-
-          {testResult.errorMessage && (
-            <p className="text-xs font-mono text-red-300 pt-1">{testResult.errorMessage}</p>
-          )}
+                {i < 2 && <span className="h-px w-4 bg-[#dce3ef] sm:w-6" />}
+              </div>
+            ))}
+          </div>
         </div>
-      )}
-    </form>
+
+        <div className="space-y-6">
+          {/* STEP 01: Website info & crawler */}
+          <SectionCard
+            step="01"
+            icon={<Globe size={19} />}
+            title="Website information & crawler"
+            subtitle="Enter the homepage URL. FormGuard crawls internal pages and sitemaps to find every contact form and its input structure."
+            action={
+              <StatusPill tone="green">
+                <span className="dot-live" /> Crawler ready
+              </StatusPill>
+            }
+          >
+            <div className="px-5 py-6 sm:px-7">
+              <div className="grid gap-5 md:grid-cols-2">
+                <div>
+                  <FieldLabel required>Client website name</FieldLabel>
+                  <input
+                    className="field"
+                    value={siteName}
+                    onChange={(e) => setSiteName(e.target.value)}
+                    placeholder="e.g. Skin Creations SG"
+                  />
+                </div>
+                <div className="panel-tint flex items-center justify-between gap-3 rounded-xl px-4 py-2.5">
+                  <div>
+                    <p className="text-[12.5px] font-semibold text-ink">Active daily monitoring</p>
+                    <p className="mt-0.5 text-[11px] text-muted">Include all forms in the 04:00 UTC cron run</p>
+                  </div>
+                  <Toggle
+                    checked={activeMonitoring}
+                    onChange={setActiveMonitoring}
+                    label="Active daily monitoring"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-5">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <FieldLabel required>
+                    Target website URL{' '}
+                    <span className="normal-case tracking-normal text-[#9aa6b9]">
+                      (homepage or specific form page)
+                    </span>
+                  </FieldLabel>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => startScan('page')}
+                      disabled={scanMode !== 'idle'}
+                    >
+                      {scanMode === 'page' ? (
+                        <RefreshCw size={13} className="animate-spin" />
+                      ) : (
+                        <Search size={13} />
+                      )}
+                      Scan current page
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => startScan('deep')}
+                      disabled={scanMode !== 'idle'}
+                    >
+                      {scanMode === 'deep' ? (
+                        <RefreshCw size={13} className="animate-spin" />
+                      ) : (
+                        <Radar size={13} />
+                      )}
+                      Deep crawl entire website
+                    </button>
+                  </div>
+                </div>
+
+                <div className="relative">
+                  <Link2
+                    size={15}
+                    className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#98a4b8]"
+                  />
+                  <input
+                    className="field !pl-10"
+                    value={siteUrl}
+                    onChange={(e) => setSiteUrl(e.target.value)}
+                    placeholder="https://example.com/"
+                  />
+                </div>
+
+                <div className="mt-2.5 flex items-start gap-2 rounded-lg bg-[#f7f9fc] px-3 py-2.5 text-[11.5px] leading-relaxed text-[#74829a]">
+                  <Lightbulb size={14} className="mt-0.5 shrink-0 text-[#d79b2d]" />
+                  <span>
+                    <strong className="font-semibold text-[#4b5b75]">Tip:</strong> Use the homepage URL with “Deep crawl entire website” to parse WordPress XML sitemaps and find sub-page forms across careers, booking, quote, and contact pages.
+                  </span>
+                </div>
+              </div>
+
+              {/* Scanning Progress Bar */}
+              {scanMode !== 'idle' && (
+                <div className="animate-rise mt-4 rounded-xl border border-[#d8e0fb] bg-[#f7f9ff] px-4 py-3.5">
+                  <div className="mb-2.5 flex items-center justify-between text-[12px] font-semibold text-cobalt">
+                    <span className="flex items-center gap-2">
+                      <RefreshCw size={13} className="animate-spin" />
+                      {scanMode === 'deep' ? 'Crawling internal pages & XML sitemaps…' : 'Inspecting current page with Playwright…'}
+                    </span>
+                    <span>{scanProgress}%</span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-[#dde4fa]">
+                    <div
+                      className="h-full rounded-full bg-cobalt transition-[width] duration-200"
+                      style={{ width: `${scanProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Discovered Forms Panel (shows only after crawling) */}
+              {discoveredForms.length > 0 && (
+                <div className="mt-6 rounded-2xl border border-line bg-[#fafbfe] p-4 sm:p-5 animate-rise">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <Sparkles size={15} className="text-cobalt" />
+                        <h3 className="font-display text-[14px] font-bold text-ink">
+                          Discovered forms across website
+                        </h3>
+                        <StatusPill tone="blue">{discoveredForms.length} found</StatusPill>
+                      </div>
+                      <p className="mt-1 text-[11.5px] text-muted">
+                        {lastScan ? `Last crawl: ${lastScan} · ` : ''}Select the forms you want to monitor and import them.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={toggleSelectAllDiscovered}
+                      >
+                        {allDiscoveredSelected ? 'Deselect all' : 'Select all'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={importSelectedForms}
+                        disabled={scanMode !== 'idle'}
+                      >
+                        <Plus size={13} /> Import selected ({selectedDiscoveredCount})
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="soft-scroll grid max-h-[350px] gap-2.5 overflow-y-auto pr-1 md:grid-cols-2">
+                    {discoveredForms.map((item: any, idx: number) => {
+                      const isSelected = !!selectedDiscovered[idx];
+                      const pagesCount = item.sharedPagesCount || item.foundOnPages?.length || 1;
+                      const inputCount = item.fields?.length || 0;
+                      const fieldPreview = item.fields?.map((f: any) => f.label).slice(0, 5).join(', ');
+
+                      return (
+                        <div
+                          key={idx}
+                          onClick={() =>
+                            setSelectedDiscovered((prev) => ({ ...prev, [idx]: !prev[idx] }))
+                          }
+                          className={`cursor-pointer rounded-xl border p-3.5 text-left transition-all ${
+                            isSelected
+                              ? 'border-[#aebcf8] bg-[#f4f6ff] shadow-[0_3px_12px_rgba(60,86,232,.07)]'
+                              : 'border-line bg-white hover:border-[#c5cfe4] hover:bg-[#fcfdff]'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <span className={`checkbox mt-0.5 ${isSelected ? 'on' : ''}`}>
+                              <Check size={12} strokeWidth={3} />
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="truncate text-[12.5px] font-bold text-ink" title={item.name}>
+                                  {sanitizeName(item.name || `Form #${idx + 1}`)}
+                                </p>
+                                <span className="pill shrink-0 bg-white text-[#6c7b95] ring-1 ring-[#e2e8f2]">
+                                  {item.formPluginType || 'Contact Form 7'}
+                                </span>
+                              </div>
+                              <p className="mt-1 truncate text-[11px] text-[#7f8da4]">
+                                <Link2 size={11} className="mr-1 inline align-[-1px]" />
+                                {item.pageUrl || siteUrl}
+                              </p>
+                              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                                <StatusPill tone="amber">
+                                  Shared across {pagesCount} {pagesCount === 1 ? 'page' : 'pages'}
+                                </StatusPill>
+                                <StatusPill tone="gray">
+                                  {inputCount} {inputCount === 1 ? 'input' : 'inputs'}
+                                </StatusPill>
+                              </div>
+                              {fieldPreview && (
+                                <p className="mt-2 truncate text-[10.5px] text-[#9aa6b9]" title={fieldPreview}>
+                                  {fieldPreview}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </SectionCard>
+
+          {/* STEP 02: Monitored Forms Manager */}
+          <div id="monitored-forms" className="scroll-mt-24">
+            <SectionCard
+              step="02"
+              icon={<Layers size={19} />}
+              title="Monitored forms on this website"
+              subtitle="Every active form below is filled and submitted during daily monitoring or when you run tests manually."
+              action={
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={addNewForm}
+                >
+                  <Plus size={13} /> Add another form
+                </button>
+              }
+            >
+              {/* Form tabs strip */}
+              <div className="soft-scroll flex items-stretch gap-1 overflow-x-auto border-b border-line bg-[#fbfcfe] px-3 pt-2 sm:px-5">
+                {forms.map((form, fIdx) => {
+                  const isActiveTab = fIdx === activeFormIndex;
+                  return (
+                    <div
+                      key={form.id || fIdx}
+                      className={`group relative flex shrink-0 items-center rounded-t-lg border-b-2 transition ${
+                        isActiveTab
+                          ? 'border-cobalt bg-white'
+                          : 'border-transparent hover:bg-white/70'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setActiveFormIndex(fIdx)}
+                        className={`flex max-w-[220px] items-center gap-2 px-3.5 py-3 text-[11.5px] font-semibold ${
+                          isActiveTab ? 'text-cobalt' : 'text-[#728199]'
+                        }`}
+                      >
+                        <span
+                          className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                            form.isActive !== false ? 'bg-mint' : 'bg-[#c1cad9]'
+                          }`}
+                        />
+                        <span className="truncate">{form.name || `Form #${fIdx + 1}`}</span>
+                        <span className="shrink-0 text-[10px] font-medium text-[#a3aec1]">
+                          {form.fields?.length || 0}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeForm(fIdx)}
+                        aria-label={`Remove ${form.name}`}
+                        className="mr-2 grid h-6 w-6 shrink-0 place-items-center rounded-md text-[#b3bdcd] transition hover:bg-[#ffeded] hover:text-[#d64c59] sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Active Form Editor */}
+              <div className="px-4 py-5 sm:px-6 sm:py-6">
+                <div className="overflow-hidden rounded-2xl border border-line bg-[#fbfcfe]">
+                  {/* Editor Header */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-white px-4 py-3.5 sm:px-5">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#eef1ff] text-cobalt">
+                        <Settings2 size={15} />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="font-display text-[10px] font-extrabold tracking-[.12em] text-[#8a97ad]">
+                          EDITING SETTINGS FOR
+                        </p>
+                        <p className="truncate text-[12.5px] font-bold text-ink">
+                          “{activeForm.name || 'Form'}”
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={handleTestActiveForm}
+                        disabled={isTestingActiveForm}
+                        className="btn btn-secondary btn-sm !h-8 text-[11.5px]"
+                      >
+                        {isTestingActiveForm ? (
+                          <LoaderCircle size={13} className="animate-spin text-cobalt" />
+                        ) : (
+                          <Play size={12} className="text-cobalt fill-current" />
+                        )}
+                        Test this form now
+                      </button>
+                      <div className="h-4 w-px bg-line" />
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11.5px] font-medium text-[#5d6c86]">
+                          Enable daily testing
+                        </span>
+                        <Toggle
+                          checked={activeForm.isActive !== false}
+                          onChange={(v) => updateActiveForm({ isActive: v })}
+                          label="Enable daily testing"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-6 px-4 py-5 sm:px-5">
+                    {/* Form Metadata */}
+                    <div className="grid gap-4 lg:grid-cols-3">
+                      <div>
+                        <FieldLabel required>Form name / label</FieldLabel>
+                        <input
+                          className="field"
+                          value={activeForm.name}
+                          onChange={(e) => updateActiveForm({ name: e.target.value })}
+                          placeholder="e.g. Booking Form"
+                        />
+                      </div>
+                      <div>
+                        <FieldLabel>Form plugin type</FieldLabel>
+                        <select
+                          className="field"
+                          value={activeForm.formPluginType}
+                          onChange={(e) => updateActiveForm({ formPluginType: e.target.value as any })}
+                        >
+                          <option value="Contact Form 7">Contact Form 7</option>
+                          <option value="Elementor Pro">Elementor Pro</option>
+                          <option value="MetForm">MetForm</option>
+                          <option value="WPForms">WPForms</option>
+                          <option value="Gravity Forms">Gravity Forms</option>
+                          <option value="Custom">Custom</option>
+                        </select>
+                      </div>
+                      <div>
+                        <FieldLabel required>Exact page URL where form lives</FieldLabel>
+                        <input
+                          className="field"
+                          value={activeForm.pageUrl}
+                          onChange={(e) => updateActiveForm({ pageUrl: e.target.value })}
+                          placeholder="https://example.com/contact/"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Presets Strip */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="mr-1 text-[11px] font-semibold text-[#8491a7]">
+                        Apply preset:
+                      </span>
+                      {['Contact Form 7', 'Elementor Pro', 'MetForm', 'WPForms', 'Gravity Forms', 'Custom'].map(
+                        (preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => applyPreset(preset)}
+                            className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
+                              activeForm.formPluginType === preset
+                                ? 'border-cobalt bg-[#eef1ff] text-cobalt'
+                                : 'border-line bg-white text-[#71809a] hover:border-[#bdc8e2] hover:text-cobalt'
+                            }`}
+                          >
+                            {preset}
+                          </button>
+                        )
+                      )}
+                    </div>
+
+                    {/* Form Inputs Matrix */}
+                    <div className="rounded-xl border border-line bg-white">
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3.5">
+                        <div>
+                          <h4 className="font-display text-[13px] font-bold text-ink">
+                            Form inputs & test values
+                          </h4>
+                          <p className="mt-0.5 text-[11px] text-muted">
+                            Playwright will automatically fill text, pick random select options, or attach dummy media.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={addFieldToActiveForm}
+                        >
+                          <Plus size={13} /> Add input field
+                        </button>
+                      </div>
+
+                      <div className="soft-scroll overflow-x-auto">
+                        <div className="min-w-[820px]">
+                          <div className="grid grid-cols-[1.05fr_1.65fr_1fr_1.15fr_30px] gap-2.5 border-b border-line bg-[#f8fafd] px-3 py-2.5">
+                            {['Label', 'CSS selector', 'Type', 'Test value', ''].map((h, i) => (
+                              <span
+                                key={i}
+                                className="text-[10px] font-bold uppercase tracking-[.09em] text-[#8a97ad]"
+                              >
+                                {h}
+                              </span>
+                            ))}
+                          </div>
+
+                          {activeForm.fields?.map((field, fIdx) => (
+                            <div
+                              key={fIdx}
+                              className="grid grid-cols-[1.05fr_1.65fr_1fr_1.15fr_30px] items-center gap-2.5 border-b border-line/70 px-3 py-2.5 last:border-0 hover:bg-[#fcfdff]"
+                            >
+                              <input
+                                className="field !h-9 text-[12px]"
+                                placeholder="Field label"
+                                value={field.label}
+                                onChange={(e) => updateActiveFormField(fIdx, { label: e.target.value })}
+                              />
+                              <input
+                                className="field !h-9 font-mono !text-[11px]"
+                                placeholder="input[name='...']"
+                                value={field.selector}
+                                onChange={(e) => updateActiveFormField(fIdx, { selector: e.target.value })}
+                              />
+                              <select
+                                className="field !h-9 !text-[11.5px]"
+                                value={mapTypeToUi(field.type)}
+                                onChange={(e) => {
+                                  const selectedUiType = e.target.value as UiFieldType;
+                                  const backendType = mapUiToType(selectedUiType);
+                                  const testValue =
+                                    backendType === 'file' ? '[Dummy Black Image]' : field.testValue;
+                                  updateActiveFormField(fIdx, {
+                                    type: backendType,
+                                    testValue,
+                                  });
+                                }}
+                              >
+                                {UI_FIELD_TYPES.map((t) => (
+                                  <option key={t} value={t}>
+                                    {t}
+                                  </option>
+                                ))}
+                              </select>
+                              <input
+                                className="field !h-9 text-[12px]"
+                                placeholder="Test value"
+                                value={field.testValue}
+                                onChange={(e) => updateActiveFormField(fIdx, { testValue: e.target.value })}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => removeFieldFromActiveForm(fIdx)}
+                                aria-label="Delete input field"
+                                className="grid h-8 w-7 place-items-center rounded-md text-[#b3bdcd] transition hover:bg-[#ffeded] hover:text-[#d64c59]"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          ))}
+
+                          {(!activeForm.fields || activeForm.fields.length === 0) && (
+                            <div className="px-4 py-8 text-center text-[12px] text-muted">
+                              No inputs added yet. Click &quot;Add input field&quot; or apply a plugin preset above.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Verification Method & Success Triggers */}
+                    <div className="grid gap-4 lg:grid-cols-3">
+                      <div>
+                        <FieldLabel required>Submit button selector</FieldLabel>
+                        <input
+                          className="field font-mono !text-[11px]"
+                          value={activeForm.submitButtonSelector}
+                          onChange={(e) =>
+                            updateActiveForm({ submitButtonSelector: e.target.value })
+                          }
+                          placeholder='button[type="submit"]'
+                        />
+                      </div>
+                      <div>
+                        <FieldLabel>Verification method</FieldLabel>
+                        <select
+                          className="field"
+                          value={activeForm.verificationMethod}
+                          onChange={(e) =>
+                            updateActiveForm({ verificationMethod: e.target.value as any })
+                          }
+                        >
+                          {VERIFICATION_OPTIONS.map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <FieldLabel required>Expected success value</FieldLabel>
+                        <input
+                          className="field font-mono !text-[11px]"
+                          value={activeForm.expectedSuccessValue}
+                          onChange={(e) =>
+                            updateActiveForm({ expectedSuccessValue: e.target.value })
+                          }
+                          placeholder=".wpcf7-mail-sent-ok"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-2 rounded-xl bg-[#f2f5ff] px-3.5 py-3 text-[11.5px] leading-relaxed text-[#5a6a90]">
+                      <ShieldCheck size={15} className="mt-0.5 shrink-0 text-cobalt" />
+                      <span>
+                        Test flow: fill <strong className="font-semibold text-ink">{activeForm.fields?.length || 0} inputs</strong> → click submit → wait for verification condition → capture full screenshot & result.
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </SectionCard>
+          </div>
+
+          {/* STEP 03: Alert & Notification routing */}
+          <SectionCard
+            step="03"
+            icon={<Bell size={19} />}
+            title="Alert & notification routing"
+            subtitle="Choose where failure alerts and screenshots are sent if any form on this website breaks."
+            action={
+              <StatusPill tone="gray">
+                <Clock size={11} /> Checks daily at 04:00 UTC
+              </StatusPill>
+            }
+          >
+            <div className="px-5 py-6 sm:px-7">
+              <div className="grid gap-3 md:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => setAlertMode('global')}
+                  className={`rounded-xl border p-4 text-left transition ${
+                    alertMode === 'global'
+                      ? 'border-cobalt bg-[#f5f7ff] shadow-[0_3px_14px_rgba(60,86,232,.09)]'
+                      : 'border-line bg-white hover:border-[#c5cfe4]'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <span
+                      className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border-2 ${
+                        alertMode === 'global' ? 'border-cobalt' : 'border-[#cbd5e3]'
+                      }`}
+                    >
+                      {alertMode === 'global' && <span className="h-1.5 w-1.5 rounded-full bg-cobalt" />}
+                    </span>
+                    <div>
+                      <p className="text-[12.5px] font-bold text-ink">
+                        Use global notification defaults
+                      </p>
+                      <p className="mt-1 text-[11.5px] leading-relaxed text-muted">
+                        Inherits email inboxes and Slack webhooks configured in Settings & Alerts.
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        <StatusPill tone="green">
+                          <Check size={10} /> Recommended
+                        </StatusPill>
+                        <StatusPill tone="gray">Global channels</StatusPill>
+                      </div>
+                    </div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setAlertMode('custom')}
+                  className={`rounded-xl border p-4 text-left transition ${
+                    alertMode === 'custom'
+                      ? 'border-cobalt bg-[#f5f7ff] shadow-[0_3px_14px_rgba(60,86,232,.09)]'
+                      : 'border-line bg-white hover:border-[#c5cfe4]'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <span
+                      className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border-2 ${
+                        alertMode === 'custom' ? 'border-cobalt' : 'border-[#cbd5e3]'
+                      }`}
+                    >
+                      {alertMode === 'custom' && <span className="h-1.5 w-1.5 rounded-full bg-cobalt" />}
+                    </span>
+                    <div>
+                      <p className="text-[12.5px] font-bold text-ink">
+                        Custom routing for this website
+                      </p>
+                      <p className="mt-1 text-[11.5px] leading-relaxed text-muted">
+                        Send this client site’s alerts directly to a dedicated client or team inbox.
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        <StatusPill tone="blue">
+                          <Mail size={10} /> Email
+                        </StatusPill>
+                        <StatusPill tone="blue">
+                          <Webhook size={10} /> Webhook
+                        </StatusPill>
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              </div>
+
+              {alertMode === 'custom' && (
+                <div className="animate-rise mt-4 grid gap-4 rounded-xl border border-line bg-[#fafbfe] p-4 md:grid-cols-2">
+                  <div>
+                    <FieldLabel>Alert email recipients</FieldLabel>
+                    <div className="relative">
+                      <Mail
+                        size={14}
+                        className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#98a4b8]"
+                      />
+                      <input
+                        className="field !pl-10"
+                        value={customEmails}
+                        onChange={(e) => setCustomEmails(e.target.value)}
+                        placeholder="client@company.com, team@agency.com"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <FieldLabel>
+                      Slack incoming webhook URL{' '}
+                      <span className="normal-case tracking-normal text-[#a3aec1]">(optional)</span>
+                    </FieldLabel>
+                    <div className="relative">
+                      <Webhook
+                        size={14}
+                        className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#98a4b8]"
+                      />
+                      <input
+                        className="field !pl-10"
+                        value={customWebhookUrl}
+                        onChange={(e) => setCustomWebhookUrl(e.target.value)}
+                        placeholder="https://hooks.slack.com/services/..."
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-[#fafbfe] px-4 py-3.5">
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 grid h-8 w-8 place-items-center rounded-lg bg-white text-cobalt ring-1 ring-line">
+                    <Bell size={14} />
+                  </span>
+                  <div>
+                    <p className="text-[12.5px] font-semibold text-ink">Also notify on passed tests</p>
+                    <p className="mt-0.5 text-[11px] text-muted">
+                      By default, FormGuard Pro only alerts you when a form fails to avoid notification fatigue.
+                    </p>
+                  </div>
+                </div>
+                <Toggle
+                  checked={notifyOnSuccess}
+                  onChange={setNotifyOnSuccess}
+                  label="Notify on passed tests"
+                />
+              </div>
+            </div>
+          </SectionCard>
+        </div>
+      </div>
+
+      {/* Sticky Bottom Action Bar */}
+      <div className="sticky bottom-0 z-30 border-t border-line bg-white/95 backdrop-blur-xl shadow-lg">
+        <div className="mx-auto flex w-full max-w-[1130px] flex-wrap items-center justify-between gap-3 px-4 py-3.5 sm:px-7 lg:px-9">
+          <div className="flex items-center gap-2.5">
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#e7f8f2] text-mint">
+              <ShieldCheck size={18} />
+            </span>
+            <div>
+              <p className="text-[12.5px] font-bold text-ink">
+                {forms.length} {forms.length === 1 ? 'form' : 'forms'} ready to monitor
+              </p>
+              <p className="text-[11px] text-muted">
+                {siteName || 'Untitled website'} · {activeMonitoring ? 'Daily schedule enabled' : 'Schedule paused'}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link href="/" className="btn btn-secondary btn-lg">
+              Cancel
+            </Link>
+            <button
+              type="button"
+              className="btn btn-primary btn-lg"
+              onClick={handleSave}
+              disabled={isSaving}
+            >
+              {isSaving ? (
+                <>
+                  <RefreshCw size={15} className="animate-spin" /> Saving…
+                </>
+              ) : (
+                <>
+                  <Check size={15} strokeWidth={2.5} /> Save website & all {forms.length} forms{' '}
+                  <ArrowRight size={14} />
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Notification Toast */}
+      <Toast notice={notice} onClose={() => setNotice(null)} />
+    </div>
   );
 }

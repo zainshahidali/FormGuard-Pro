@@ -1,23 +1,23 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
-  FileText,
-  CheckCircle2,
-  XCircle,
-  Clock,
+  Download,
+  RefreshCw,
   Search,
   Filter,
-  Image as ImageIcon,
-  Loader2,
+  CircleCheck,
+  CircleAlert,
+  ChevronRight,
+  Clock,
+  Play,
+  FileText,
   ExternalLink,
-  Mail,
-  MessageSquare,
-  AlertOctagon,
-  ArrowRight,
-  Download,
+  Layers,
+  Globe,
 } from 'lucide-react';
+import { StatusPill, Toast, type Notice } from '@/components/ui';
 import LogDetailModal from '@/components/LogDetailModal';
 
 export const dynamic = 'force-dynamic';
@@ -29,33 +29,16 @@ function LogsContent() {
   const [logs, setLogs] = useState<any[]>([]);
   const [sites, setSites] = useState<any[]>([]);
   const [selectedSiteId, setSelectedSiteId] = useState<string>(initialSiteId);
-  const [selectedStatus, setSelectedStatus] = useState<string>('all');
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [activeLog, setActiveLog] = useState<any | null>(null);
+  const [filter, setFilter] = useState<'All' | 'Passed' | 'Failed'>('All');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [activeModalLog, setActiveModalLog] = useState<any | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [notice, setNotice] = useState<Notice | null>(null);
 
-  const fetchLogs = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const query = new URLSearchParams();
-      if (selectedSiteId && selectedSiteId !== 'all') {
-        query.set('siteId', selectedSiteId);
-      }
-      if (selectedStatus && selectedStatus !== 'all') {
-        query.set('status', selectedStatus);
-      }
-      query.set('limit', '100');
-
-      const res = await fetch(`/api/logs?${query.toString()}`);
-      const data = await res.json();
-      if (data.success) {
-        setLogs(data.logs || []);
-      }
-    } catch (err) {
-      console.error('Failed to fetch logs:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [selectedSiteId, selectedStatus]);
+  const notify = (message: string, tone: 'success' | 'info' | 'error' = 'success') => {
+    setNotice({ id: Date.now(), message, tone });
+  };
 
   const fetchSites = async () => {
     try {
@@ -69,6 +52,27 @@ function LogsContent() {
     }
   };
 
+  const fetchLogs = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const query = new URLSearchParams();
+      if (selectedSiteId && selectedSiteId !== 'all') {
+        query.set('siteId', selectedSiteId);
+      }
+      query.set('limit', '100');
+
+      const res = await fetch(`/api/logs?${query.toString()}`);
+      const data = await res.json();
+      if (data.success) {
+        setLogs(data.logs || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch logs:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [selectedSiteId]);
+
   useEffect(() => {
     fetchSites();
   }, []);
@@ -77,244 +81,274 @@ function LogsContent() {
     fetchLogs();
   }, [fetchLogs]);
 
+  // Filter logs by Status and Query
+  const filteredLogs = useMemo(() => {
+    return logs.filter((log) => {
+      const isPassed = log.status === 'passed';
+      const matchesStatus =
+        filter === 'All' ? true : filter === 'Passed' ? isPassed : !isPassed;
+
+      const siteName = log.siteId?.name || '';
+      const siteUrl = log.siteId?.url || '';
+      const formsText = log.formResults?.map((f: any) => f.formName).join(' ') || '';
+      const errorText = log.errorMessage || '';
+
+      const fullHaystack = `${siteName} ${siteUrl} ${formsText} ${errorText}`.toLowerCase();
+      const matchesQuery = fullHaystack.includes(searchQuery.toLowerCase());
+
+      return matchesStatus && matchesQuery;
+    });
+  }, [logs, filter, searchQuery]);
+
+  const passedCount = logs.filter((l) => l.status === 'passed').length;
+  const failedCount = logs.filter((l) => l.status === 'failed').length;
+
+  // Export CSV
+  const exportCsv = () => {
+    const header = 'Status,Website,Forms Tested,Duration(ms),Executed At,Error Message';
+    const rows = filteredLogs.map((l) => {
+      const siteName = (l.siteId?.name || 'Website').replace(/"/g, '""');
+      const formsCount = l.formResults?.length || 1;
+      const duration = l.durationMs || 0;
+      const date = l.executedAt ? new Date(l.executedAt).toISOString() : '';
+      const error = (l.errorMessage || '').replace(/"/g, '""');
+
+      return `"${l.status}","${siteName}","${formsCount}","${duration}","${date}","${error}"`;
+    });
+
+    const blob = new Blob([[header, ...rows].join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `formguard-test-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    notify('Test log CSV exported successfully.', 'success');
+  };
+
+  const triggerRunAll = () => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('formguard:open-run-all'));
+    }
+  };
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2.5">
-            <FileText className="w-6 h-6 text-sky-accent" /> Test Execution Logs & Failure Screenshots
-          </h1>
-          <p className="text-xs text-slate-400 mt-1">
-            Historical Playwright verification runs, captured console exceptions, and visual failure screenshots.
-          </p>
+    <div className="canvas-glow min-h-full">
+      <div className="mx-auto w-full max-w-[1130px] px-4 py-7 sm:px-7 lg:px-9">
+        {/* Page Heading */}
+        <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="mb-2 font-display text-[10px] font-extrabold tracking-[.17em] text-cobalt">
+              TEST HISTORY
+            </p>
+            <h1 className="font-display text-[26px] font-extrabold leading-tight tracking-[-.035em] text-ink sm:text-[32px]">
+              Test logs
+            </h1>
+            <p className="mt-1.5 text-[13px] text-muted">
+              Every submission attempt, verification result, console log, and screenshot from your monitored forms.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button className="btn btn-secondary btn-lg" onClick={exportCsv}>
+              <Download size={14} /> Export CSV
+            </button>
+            <button className="btn btn-primary btn-lg" onClick={triggerRunAll}>
+              <RefreshCw size={14} /> Run new tests
+            </button>
+          </div>
         </div>
 
-        {/* Filter Controls */}
-        <div className="flex items-center gap-3">
-          {/* Site Filter */}
-          <select
-            value={selectedSiteId}
-            onChange={(e) => setSelectedSiteId(e.target.value)}
-            className="bg-navy-800 border border-surface-border rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-accent cursor-pointer"
-          >
-            <option value="all">All Monitored Sites</option>
-            {sites.map((site) => (
-              <option key={site._id} value={site._id}>
-                {site.name}
-              </option>
-            ))}
-          </select>
-
-          {/* Status Filter */}
-          <select
-            value={selectedStatus}
-            onChange={(e) => setSelectedStatus(e.target.value)}
-            className="bg-navy-800 border border-surface-border rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-accent cursor-pointer"
-          >
-            <option value="all">All Statuses</option>
-            <option value="failed">Failed Only (🚨)</option>
-            <option value="passed">Passed Only (✅)</option>
-          </select>
-
-          {/* Export CSV Button */}
-          <a
-            href={`/api/logs/export?siteId=${selectedSiteId}&status=${selectedStatus}`}
-            download
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-slate-200 bg-surface hover:bg-surface-hover border border-surface-border transition-colors shadow-sm"
-            title="Download logs report as CSV"
-          >
-            <Download className="w-3.5 h-3.5 text-sky-accent" />
-            <span className="hidden sm:inline">Export CSV</span>
-          </a>
-        </div>
-      </div>
-
-      {/* Logs Table Container */}
-      <div className="bg-surface border border-surface-border rounded-xl overflow-hidden shadow-lg">
-        <div className="overflow-x-auto">
-          {isLoading ? (
-            <div className="py-20 text-center">
-              <Loader2 className="w-8 h-8 text-sky-accent animate-spin mx-auto" />
-              <p className="text-xs text-slate-400 mt-2">Loading test run history...</p>
+        {/* Main Panel */}
+        <div className="panel animate-rise overflow-hidden">
+          {/* Filter Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-4 sm:px-5">
+            <div className="flex items-center gap-1 rounded-xl bg-[#f2f5fa] p-1">
+              {(['All', 'Passed', 'Failed'] as const).map((option) => (
+                <button
+                  key={option}
+                  onClick={() => setFilter(option)}
+                  className={`rounded-lg px-3.5 py-1.5 text-[11.5px] font-semibold transition ${
+                    filter === option
+                      ? 'bg-white text-ink shadow-sm'
+                      : 'text-[#8491a7] hover:text-ink'
+                  }`}
+                >
+                  {option}
+                  {option === 'Passed' && <span className="ml-1 text-[10px] text-mint">({passedCount})</span>}
+                  {option === 'Failed' && <span className="ml-1 text-[10px] text-[#dc5262]">({failedCount})</span>}
+                </button>
+              ))}
             </div>
-          ) : logs.length === 0 ? (
-            <div className="py-20 text-center space-y-3">
-              <div className="w-12 h-12 rounded-full bg-navy-800 border border-surface-border flex items-center justify-center text-slate-400 mx-auto">
-                <FileText className="w-6 h-6" />
+
+            <div className="flex flex-1 flex-wrap items-center gap-2 sm:max-w-[480px]">
+              {/* Site Selector */}
+              <select
+                value={selectedSiteId}
+                onChange={(e) => setSelectedSiteId(e.target.value)}
+                className="field !h-9 !w-auto text-[11.5px]"
+              >
+                <option value="all">All Websites ({sites.length})</option>
+                {sites.map((s) => (
+                  <option key={s._id} value={s._id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+
+              {/* Search query */}
+              <div className="relative flex-1 min-w-[170px]">
+                <Search
+                  size={14}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#9aa6b9]"
+                />
+                <input
+                  className="field !h-9 !pl-9 text-[11.5px]"
+                  placeholder="Search forms, sites or errors…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
               </div>
-              <h3 className="text-sm font-semibold text-slate-200">No Test Logs Found</h3>
-              <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                No execution logs match the selected filter criteria. Run a manual test or wait for the daily cron schedule.
-              </p>
             </div>
-          ) : (
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-surface-border bg-navy-800 text-slate-400 font-semibold uppercase tracking-wider">
-                  <th className="py-3 px-5">Site & Form</th>
-                  <th className="py-3 px-5">Status</th>
-                  <th className="py-3 px-5">Duration</th>
-                  <th className="py-3 px-5">Error / Details</th>
-                  <th className="py-3 px-5">Screenshot</th>
-                  <th className="py-3 px-5">Alerts</th>
-                  <th className="py-3 px-5">Timestamp</th>
-                  <th className="py-3 px-5 text-right">Inspect</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-surface-border/60">
-                {logs.map((log) => {
+          </div>
+
+          {/* Table Container */}
+          <div className="soft-scroll overflow-x-auto">
+            <div className="min-w-[760px]">
+              <div className="grid grid-cols-[110px_1.4fr_1.2fr_100px_90px_140px_24px] gap-3 border-b border-line bg-[#f8fafd] px-5 py-2.5">
+                {['Status', 'Form / Site', 'Target URL', 'Trigger', 'Duration', 'Time', ''].map(
+                  (h) => (
+                    <span
+                      key={h}
+                      className="text-[10px] font-bold uppercase tracking-[.09em] text-[#8a97ad]"
+                    >
+                      {h}
+                    </span>
+                  )
+                )}
+              </div>
+
+              {isLoading ? (
+                <div className="py-12 text-center text-[12px] text-muted">
+                  <RefreshCw size={18} className="mx-auto mb-2 animate-spin text-cobalt" />
+                  Loading test logs…
+                </div>
+              ) : filteredLogs.length > 0 ? (
+                filteredLogs.map((log) => {
                   const isPassed = log.status === 'passed';
                   const site = log.siteId || {};
+                  const isExpanded = expandedId === log._id;
+                  const formsCount = log.formResults?.length || 1;
+                  const formLabel =
+                    log.formResults && log.formResults.length === 1
+                      ? log.formResults[0].formName
+                      : log.formResults && log.formResults.length > 1
+                      ? `${formsCount} forms verified`
+                      : site.name || 'Form test';
+
+                  const timeDisplay = log.executedAt
+                    ? new Date(log.executedAt).toLocaleString([], {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    : 'N/A';
 
                   return (
-                    <tr
-                      key={log._id}
-                      onClick={() => setActiveLog(log)}
-                      className="hover:bg-navy-800/60 transition-colors cursor-pointer group"
-                    >
-                      {/* Site Name & Plugin */}
-                      <td className="py-4 px-5">
-                        <div className="font-semibold text-slate-100 text-sm">
-                          {site.name || 'Unknown Site'}
+                    <div key={log._id} className="border-b border-line/70 last:border-0">
+                      <button
+                        onClick={() => setExpandedId(isExpanded ? null : log._id)}
+                        className="grid w-full grid-cols-[110px_1.4fr_1.2fr_100px_90px_140px_24px] items-center gap-3 px-5 py-3.5 text-left transition hover:bg-[#fafbfe]"
+                      >
+                        <StatusPill tone={isPassed ? 'green' : 'red'}>
+                          {isPassed ? <CircleCheck size={11} /> : <CircleAlert size={11} />}
+                          {isPassed ? 'Passed' : 'Failed'}
+                        </StatusPill>
+                        <div className="min-w-0">
+                          <p className="truncate text-[12px] font-semibold text-ink">
+                            {site.name || 'Unknown Site'}
+                          </p>
+                          <p className="truncate text-[10.5px] text-muted">{formLabel}</p>
                         </div>
-                        <div className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">
-                          <span>{site.formPluginType || 'Form'}</span>
-                          {site.url && (
-                            <span className="text-slate-500 truncate max-w-[200px]">
-                              • {site.url}
-                            </span>
-                          )}
-                        </div>
-                      </td>
+                        <span className="truncate text-[11.5px] text-[#6b7b95]">
+                          {site.url?.replace(/^https?:\/\//, '') || '—'}
+                        </span>
+                        <span className="text-[11.5px] text-[#6b7b95]">
+                          {log.triggeredBy || 'Scheduled'}
+                        </span>
+                        <span className="font-mono text-[11.5px] text-[#6b7b95]">
+                          {log.durationMs ? `${log.durationMs}ms` : '—'}
+                        </span>
+                        <span className="text-[11.5px] text-[#6b7b95]">{timeDisplay}</span>
+                        <ChevronRight
+                          size={14}
+                          className={`text-[#b3bdcd] transition-transform duration-200 ${
+                            isExpanded ? 'rotate-90 text-cobalt' : ''
+                          }`}
+                        />
+                      </button>
 
-                      {/* Status */}
-                      <td className="py-4 px-5">
-                        {isPassed ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            Passed
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-red-500/15 text-red-400 border border-red-500/30">
-                            <XCircle className="w-3.5 h-3.5" />
-                            Failed
-                          </span>
-                        )}
-                      </td>
-
-                      {/* Duration */}
-                      <td className="py-4 px-5 font-mono text-slate-300">
-                        {log.durationMs ? `${log.durationMs}ms` : '—'}
-                      </td>
-
-                      {/* Error Preview */}
-                      <td className="py-4 px-5 max-w-xs">
-                        {!isPassed && log.errorMessage ? (
-                          <div className="truncate text-red-300 font-mono text-[11px] bg-red-950/40 px-2 py-1 rounded border border-red-900/50">
-                            {log.errorMessage}
+                      {/* Expanded Preview Drawer */}
+                      {isExpanded && (
+                        <div className="animate-rise border-t border-line/50 bg-[#f8faff] px-5 py-4 text-[11.5px]">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <span className="font-semibold text-cobalt">Run summary: </span>
+                              <span className="text-[#556784]">
+                                {log.errorMessage ? (
+                                  <strong className="text-[#c93448] font-normal">{log.errorMessage}</strong>
+                                ) : (
+                                  'Playwright successfully filled inputs, submitted form, and detected success indicator.'
+                                )}
+                              </span>
+                            </div>
+                            <button
+                              className="btn btn-secondary btn-sm shrink-0"
+                              onClick={() => setActiveModalLog(log)}
+                            >
+                              View full report & screenshot →
+                            </button>
                           </div>
-                        ) : (
-                          <span className="text-slate-400 italic">Submission confirmed</span>
-                        )}
-                      </td>
-
-                      {/* Screenshot Thumbnail */}
-                      <td className="py-4 px-5">
-                        {log.screenshotBase64 ? (
-                          <div className="flex items-center gap-1.5 text-sky-accent group-hover:underline">
-                            <ImageIcon className="w-3.5 h-3.5" />
-                            <span className="text-[11px] font-medium">Captured</span>
-                          </div>
-                        ) : (
-                          <span className="text-slate-500 text-[11px]">—</span>
-                        )}
-                      </td>
-
-                      {/* Alerts Sent */}
-                      <td className="py-4 px-5">
-                        <div className="flex items-center gap-2">
-                          <span
-                            title={log.notificationsSent?.email ? 'Email alert sent' : 'No email sent'}
-                            className={`p-1 rounded ${
-                              log.notificationsSent?.email
-                                ? 'bg-sky-accent/20 text-sky-accent'
-                                : 'text-slate-600'
-                            }`}
-                          >
-                            <Mail className="w-3.5 h-3.5" />
-                          </span>
-                          <span
-                            title={log.notificationsSent?.slack ? 'Slack alert sent' : 'No Slack sent'}
-                            className={`p-1 rounded ${
-                              log.notificationsSent?.slack
-                                ? 'bg-amber-500/20 text-amber-400'
-                                : 'text-slate-600'
-                            }`}
-                          >
-                            <MessageSquare className="w-3.5 h-3.5" />
-                          </span>
                         </div>
-                      </td>
-
-                      {/* Timestamp */}
-                      <td className="py-4 px-5 text-slate-400">
-                        <div className="flex flex-col">
-                          <span className="text-slate-200">
-                            {new Date(log.executedAt).toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                              second: '2-digit',
-                            })}
-                          </span>
-                          <span className="text-[10px] text-slate-500">
-                            {new Date(log.executedAt).toLocaleDateString()}
-                          </span>
-                        </div>
-                      </td>
-
-                      {/* Action */}
-                      <td className="py-4 px-5 text-right">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setActiveLog(log);
-                          }}
-                          className="px-2.5 py-1 rounded bg-navy-800 hover:bg-surface-hover border border-surface-border text-slate-300 hover:text-white transition-colors text-[11px] font-medium"
-                        >
-                          View Details
-                        </button>
-                      </td>
-                    </tr>
+                      )}
+                    </div>
                   );
-                })}
-              </tbody>
-            </table>
-          )}
+                })
+              ) : (
+                <div className="px-5 py-12 text-center text-[12.5px] text-muted">
+                  No test runs match your filters.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Table Footer */}
+          <div className="flex items-center justify-between border-t border-line px-5 py-3.5 text-[11.5px] text-muted">
+            <span>
+              Showing {filteredLogs.length} of {logs.length} runs
+            </span>
+            <span className="flex items-center gap-1.5">
+              <Clock size={12} /> Live telemetry recorded to MongoDB Atlas
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Log Modal */}
-      {activeLog && (
-        <LogDetailModal log={activeLog} onClose={() => setActiveLog(null)} />
+      {/* Log Detail Modal */}
+      {activeModalLog && (
+        <LogDetailModal log={activeModalLog} onClose={() => setActiveModalLog(null)} />
       )}
+
+      {/* Toast */}
+      <Toast notice={notice} onClose={() => setNotice(null)} />
     </div>
   );
 }
 
 export default function LogsPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="py-20 text-center">
-          <Loader2 className="w-8 h-8 text-sky-accent animate-spin mx-auto" />
-          <p className="text-xs text-slate-400 mt-2">Loading logs...</p>
-        </div>
-      }
-    >
+    <Suspense fallback={<div className="p-8 text-center text-muted">Loading logs...</div>}>
       <LogsContent />
     </Suspense>
   );
 }
-
-

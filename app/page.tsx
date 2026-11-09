@@ -1,26 +1,30 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import {
   Globe,
-  CheckCircle2,
-  AlertTriangle,
-  Clock,
+  Layers,
+  Activity,
+  ShieldCheck,
+  CalendarClock,
+  Database,
+  ArrowRight,
+  ArrowUpRight,
   Play,
-  Loader2,
   Plus,
+  Sparkles,
+  ChevronRight,
+  CircleCheck,
+  CircleAlert,
+  Search,
+  ExternalLink,
   Edit2,
   Trash2,
-  History,
-  ExternalLink,
-  Mail,
-  MessageSquare,
-  ShieldCheck,
-  ShieldAlert,
-  Search,
-  Filter,
+  LoaderCircle,
+  RefreshCw,
 } from 'lucide-react';
+import { StatusPill, Toast, type Notice } from '@/components/ui';
 import LogDetailModal from '@/components/LogDetailModal';
 
 export default function DashboardPage() {
@@ -29,23 +33,19 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [testingSiteId, setTestingSiteId] = useState<string | null>(null);
   const [activeModalLog, setActiveModalLog] = useState<any | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [toastMessage, setToastMessage] = useState<{
-    text: string;
-    type: 'success' | 'error';
-  } | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [siteFilter, setSiteFilter] = useState<'all' | 'healthy' | 'failing'>('all');
+  const [notice, setNotice] = useState<Notice | null>(null);
 
-  const showToast = (text: string, type: 'success' | 'error' = 'success') => {
-    setToastMessage({ text, type });
-    setTimeout(() => setToastMessage(null), 5000);
+  const notify = (message: string, tone: 'success' | 'info' | 'error' = 'success') => {
+    setNotice({ id: Date.now(), message, tone });
   };
 
   const fetchData = useCallback(async () => {
     try {
       const [sitesRes, logsRes] = await Promise.all([
         fetch('/api/sites'),
-        fetch('/api/logs?limit=10'),
+        fetch('/api/logs?limit=50'),
       ]);
 
       const sitesData = await sitesRes.json();
@@ -67,19 +67,16 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchData();
 
-    const handleRefetch = () => {
-      fetchData();
-    };
-
+    const handleRefetch = () => fetchData();
     window.addEventListener('formguard:refetch', handleRefetch);
-    return () => {
-      window.removeEventListener('formguard:refetch', handleRefetch);
-    };
+    return () => window.removeEventListener('formguard:refetch', handleRefetch);
   }, [fetchData]);
 
-  // Single Site Run Test
+  // Run single site test
   const handleTestSite = async (siteId: string, siteName: string) => {
     setTestingSiteId(siteId);
+    notify(`Testing all forms for "${siteName}"…`, 'info');
+
     try {
       const res = await fetch('/api/test/run-single', {
         method: 'POST',
@@ -89,38 +86,25 @@ export default function DashboardPage() {
 
       const data = await res.json();
       if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Form test failed to execute.');
+        throw new Error(data.error || 'Form test execution failed.');
       }
 
       if (data.result.status === 'passed') {
-        showToast(`✅ ${siteName}: Form test PASSED in ${data.result.durationMs}ms!`, 'success');
+        notify(`✅ ${siteName}: All forms passed in ${data.result.durationMs}ms!`, 'success');
       } else {
-        showToast(`🚨 ${siteName}: Form test FAILED — ${data.result.errorMessage}`, 'error');
+        notify(`🚨 ${siteName}: Test failed — ${data.result.errorMessage}`, 'error');
       }
 
-      // Update site locally
-      setSites((prev) =>
-        prev.map((s) =>
-          s._id === siteId
-            ? {
-                ...s,
-                lastStatus: data.result.status === 'passed' ? 'healthy' : 'failing',
-                lastCheckedAt: new Date().toISOString(),
-              }
-            : s
-        )
-      );
-
-      // Refresh logs
+      // Re-fetch updated site status and logs
       fetchData();
     } catch (err: any) {
-      showToast(err.message || 'Failed to trigger form test.', 'error');
+      notify(err.message || 'Failed to trigger form test.', 'error');
     } finally {
       setTestingSiteId(null);
     }
   };
 
-  // Delete Site
+  // Delete site
   const handleDeleteSite = async (siteId: string, siteName: string) => {
     if (!confirm(`Are you sure you want to stop monitoring "${siteName}" and remove it?`)) {
       return;
@@ -132,433 +116,442 @@ export default function DashboardPage() {
       if (!res.ok || !data.success) {
         throw new Error(data.error || 'Failed to delete site.');
       }
-      showToast(`Site "${siteName}" removed successfully.`);
+      notify(`Website "${siteName}" removed from monitoring.`, 'info');
       setSites((prev) => prev.filter((s) => s._id !== siteId));
     } catch (err: any) {
-      showToast(err.message || 'Error deleting site.', 'error');
+      notify(err.message || 'Error deleting site.', 'error');
     }
   };
 
-  // Calculate KPIs
+  const triggerRunAll = () => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('formguard:open-run-all'));
+    }
+  };
+
+  // Metrics computation
   const totalSites = sites.length;
+  const totalForms = sites.reduce((sum, s) => sum + (s.forms?.length || 1), 0);
   const healthySites = sites.filter((s) => s.lastStatus === 'healthy').length;
   const failingSites = sites.filter((s) => s.lastStatus === 'failing').length;
-  const pendingSites = sites.filter((s) => s.lastStatus === 'pending' || !s.lastStatus).length;
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
-  const testsTodayCount = logs.filter(
-    (l) => new Date(l.executedAt) >= todayStart
-  ).length;
+  const testsTodayCount = logs.filter((l) => new Date(l.executedAt) >= todayStart).length;
 
-  // Filtered Sites
+  const passedLogsCount = logs.filter((l) => l.status === 'passed').length;
+  const failedLogsCount = logs.filter((l) => l.status === 'failed').length;
+  const successRate =
+    logs.length > 0 ? ((passedLogsCount / logs.length) * 100).toFixed(1) : '100.0';
+
+  // 7-day chart computation
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const chartDays = useMemo(() => {
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      d.setHours(0, 0, 0, 0);
+
+      const nextD = new Date(d);
+      nextD.setDate(nextD.getDate() + 1);
+
+      const dayLogs = logs.filter((l) => {
+        const time = new Date(l.executedAt).getTime();
+        return time >= d.getTime() && time < nextD.getTime();
+      });
+
+      const dayPassed = dayLogs.filter((l) => l.status === 'passed').length;
+      const rate = dayLogs.length > 0 ? Math.round((dayPassed / dayLogs.length) * 100) : 100;
+
+      days.push({
+        label: dayNames[d.getDay()],
+        rate,
+        total: dayLogs.length,
+      });
+    }
+    return days;
+  }, [logs]);
+
+  // Filtered sites
   const filteredSites = sites.filter((site) => {
     const matchesSearch =
-      site.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      site.url.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (site.formPluginType && site.formPluginType.toLowerCase().includes(searchTerm.toLowerCase()));
+      site.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      site.url?.toLowerCase().includes(searchQuery.toLowerCase());
 
-    const matchesStatus =
-      statusFilter === 'all'
+    const matchesFilter =
+      siteFilter === 'all'
         ? true
-        : statusFilter === 'healthy'
+        : siteFilter === 'healthy'
         ? site.lastStatus === 'healthy'
-        : statusFilter === 'failing'
-        ? site.lastStatus === 'failing'
-        : site.lastStatus === 'pending' || !site.lastStatus;
+        : site.lastStatus === 'failing';
 
-    return matchesSearch && matchesStatus;
+    return matchesSearch && matchesFilter;
   });
 
   return (
-    <div className="space-y-8">
-      {/* Toast Notification */}
-      {toastMessage && (
-        <div
-          className={`fixed bottom-6 right-6 z-50 p-4 rounded-xl shadow-2xl border flex items-center gap-3 text-sm animate-in fade-in slide-in-from-bottom-5 duration-300 ${
-            toastMessage.type === 'success'
-              ? 'bg-emerald-950/90 border-emerald-700 text-emerald-100'
-              : 'bg-red-950/90 border-red-700 text-red-100'
-          }`}
-        >
-          {toastMessage.type === 'success' ? (
-            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-          ) : (
-            <AlertTriangle className="w-5 h-5 text-red-400 shrink-0" />
-          )}
-          <span>{toastMessage.text}</span>
-        </div>
-      )}
-
-      {/* Page Title & Quick Intro */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">WordPress Form Health Monitor</h1>
-          <p className="text-xs text-slate-400 mt-1">
-            Real-time daily verification of client contact forms with automated alerts & failure screenshot logs.
-          </p>
-        </div>
-
-        <Link
-          href="/sites/new"
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold text-navy-900 bg-gradient-to-r from-sky-accent to-teal-light hover:brightness-110 transition-all shadow-md shadow-sky-accent/20 w-fit"
-        >
-          <Plus className="w-4 h-4 stroke-[3]" /> Add New Website
-        </Link>
-      </div>
-
-      {/* KPI Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Total Monitored */}
-        <div className="bg-surface border border-surface-border rounded-xl p-5 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-400">Total Monitored Sites</span>
-            <div className="p-2 rounded-lg bg-sky-accent/10 border border-sky-accent/20 text-sky-accent">
-              <Globe className="w-4 h-4" />
-            </div>
+    <div className="canvas-glow min-h-full">
+      <div className="mx-auto w-full max-w-[1130px] px-4 py-7 sm:px-7 lg:px-9">
+        {/* Page Heading */}
+        <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="mb-2 font-display text-[10px] font-extrabold tracking-[.17em] text-cobalt">
+              WORKSPACE OVERVIEW
+            </p>
+            <h1 className="font-display text-[26px] font-extrabold leading-tight tracking-[-.035em] text-ink sm:text-[32px]">
+              Monitor health
+            </h1>
+            <p className="mt-1.5 text-[13px] text-muted">
+              Your forms are being tested automatically with headless Playwright. Here’s what happened in the last 24 hours.
+            </p>
           </div>
-          <div className="text-3xl font-bold text-white mt-3">{totalSites}</div>
-          <p className="text-[11px] text-slate-400 mt-1">Active client web forms</p>
-        </div>
-
-        {/* Healthy Forms */}
-        <div className="bg-surface border border-surface-border rounded-xl p-5 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-emerald-400">Healthy Forms</span>
-            <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
-              <ShieldCheck className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="text-3xl font-bold text-emerald-400 mt-3">{healthySites}</div>
-          <p className="text-[11px] text-slate-400 mt-1">Submissions verified</p>
-        </div>
-
-        {/* Failing Forms */}
-        <div className="bg-surface border border-surface-border rounded-xl p-5 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-red-400">Failing Forms</span>
-            <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400">
-              <ShieldAlert className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="text-3xl font-bold text-red-400 mt-3">{failingSites}</div>
-          <p className="text-[11px] text-slate-400 mt-1">Requires immediate attention</p>
-        </div>
-
-        {/* Tests Run Today */}
-        <div className="bg-surface border border-surface-border rounded-xl p-5 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-teal-light">Tests Run Today</span>
-            <div className="p-2 rounded-lg bg-teal-accent/15 border border-teal-accent/30 text-teal-light">
-              <Clock className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="text-3xl font-bold text-white mt-3">{testsTodayCount}</div>
-          <p className="text-[11px] text-slate-400 mt-1">
-            {pendingSites > 0 ? `${pendingSites} pending tests` : 'All sites up to date'}
-          </p>
-        </div>
-      </div>
-
-      {/* Monitored Sites Table Section */}
-      <div className="bg-surface border border-surface-border rounded-xl overflow-hidden shadow-lg">
-        {/* Table Toolbar */}
-        <div className="p-5 border-b border-surface-border flex flex-col sm:flex-row items-center justify-between gap-4 bg-navy-800">
-          <div className="flex items-center gap-2">
-            <h2 className="text-base font-semibold text-white">Monitored Client Sites</h2>
-            <span className="text-xs text-slate-400 font-medium px-2 py-0.5 rounded-full bg-navy-900 border border-surface-border">
-              {filteredSites.length}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-3 w-full sm:w-auto">
-            {/* Search Input */}
-            <div className="relative w-full sm:w-64">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-              <input
-                type="text"
-                placeholder="Search site, URL, or plugin..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full bg-navy-900 border border-surface-border rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-accent"
-              />
-            </div>
-
-            {/* Filter Dropdown */}
-            <div className="relative">
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="bg-navy-900 border border-surface-border rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-sky-accent cursor-pointer"
-              >
-                <option value="all">All Statuses</option>
-                <option value="healthy">Healthy Only</option>
-                <option value="failing">Failing Only</option>
-                <option value="pending">Pending Only</option>
-              </select>
-            </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button className="btn btn-secondary btn-lg" onClick={triggerRunAll}>
+              <Play size={14} className="fill-current text-cobalt" /> Run all tests
+            </button>
+            <Link href="/sites/new" className="btn btn-primary btn-lg">
+              <Plus size={15} strokeWidth={2.5} /> Add website
+            </Link>
           </div>
         </div>
 
-        {/* Sites Table */}
-        <div className="overflow-x-auto">
-          {isLoading ? (
-            <div className="py-16 text-center">
-              <Loader2 className="w-8 h-8 text-sky-accent animate-spin mx-auto" />
-              <p className="text-xs text-slate-400 mt-2">Loading monitored websites...</p>
+        {/* 4 Stat Cards */}
+        <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="panel animate-rise p-4.5">
+            <div className="flex items-start justify-between">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#eef1ff] text-cobalt">
+                <Globe size={17} />
+              </span>
+              <ArrowUpRight size={15} className="text-[#b5c0d2]" />
             </div>
-          ) : filteredSites.length === 0 ? (
-            <div className="py-16 text-center space-y-4">
-              <div className="w-12 h-12 rounded-full bg-navy-800 border border-surface-border flex items-center justify-center text-slate-400 mx-auto">
-                <Globe className="w-6 h-6" />
-              </div>
+            <p className="mt-4 font-display text-[27px] font-extrabold leading-none tracking-tight text-ink">
+              {totalSites}
+            </p>
+            <p className="mt-1.5 text-[12px] font-semibold text-[#4d5c76]">Websites monitored</p>
+            <p className="mt-2 text-[11px] text-[#91a0b5]">
+              {healthySites} healthy · {failingSites} failing
+            </p>
+          </div>
+
+          <div className="panel animate-rise p-4.5" style={{ animationDelay: '60ms' }}>
+            <div className="flex items-start justify-between">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#f0ecff] text-[#7655d8]">
+                <Layers size={17} />
+              </span>
+              <ArrowUpRight size={15} className="text-[#b5c0d2]" />
+            </div>
+            <p className="mt-4 font-display text-[27px] font-extrabold leading-none tracking-tight text-ink">
+              {totalForms}
+            </p>
+            <p className="mt-1.5 text-[12px] font-semibold text-[#4d5c76]">Forms tracked</p>
+            <p className="mt-2 text-[11px] text-[#91a0b5]">Across {totalSites} WordPress sites</p>
+          </div>
+
+          <div className="panel animate-rise p-4.5" style={{ animationDelay: '120ms' }}>
+            <div className="flex items-start justify-between">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#fff2e3] text-[#d8892c]">
+                <Activity size={17} />
+              </span>
+              <ArrowUpRight size={15} className="text-[#b5c0d2]" />
+            </div>
+            <p className="mt-4 font-display text-[27px] font-extrabold leading-none tracking-tight text-ink">
+              {testsTodayCount}
+            </p>
+            <p className="mt-1.5 text-[12px] font-semibold text-[#4d5c76]">Tests run today</p>
+            <p className="mt-2 text-[11px] text-[#91a0b5]">04:00 UTC schedule</p>
+          </div>
+
+          <div className="panel animate-rise p-4.5" style={{ animationDelay: '180ms' }}>
+            <div className="flex items-start justify-between">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#e7f8f2] text-mint">
+                <ShieldCheck size={17} />
+              </span>
+              <ArrowUpRight size={15} className="text-[#b5c0d2]" />
+            </div>
+            <p className="mt-4 font-display text-[27px] font-extrabold leading-none tracking-tight text-ink">
+              {successRate}%
+            </p>
+            <p className="mt-1.5 text-[12px] font-semibold text-[#4d5c76]">Success rate</p>
+            <p className="mt-2 text-[11px] text-[#91a0b5]">
+              {passedLogsCount} / {logs.length || 0} total tests
+            </p>
+          </div>
+        </div>
+
+        {/* 2-Column Hero: Chart + Next automated run */}
+        <div className="mt-5 grid gap-5 xl:grid-cols-[1.55fr_1fr]">
+          <div className="panel animate-rise p-5 sm:p-6">
+            <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h3 className="text-sm font-semibold text-slate-200">No Monitored Sites Found</h3>
-                <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-                  {searchTerm || statusFilter !== 'all'
-                    ? 'No sites match your filter criteria. Try resetting search.'
-                    : 'Get started by adding your first client WordPress website contact form.'}
+                <h2 className="font-display text-[15px] font-bold text-ink">Submission success rate</h2>
+                <p className="mt-1 text-[11.5px] text-muted">
+                  Automated checks across all websites · last 7 days
                 </p>
               </div>
-              <Link
-                href="/sites/new"
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-navy-900 bg-sky-accent hover:brightness-110 transition-all"
+              <StatusPill tone="green">
+                <Sparkles size={11} /> {successRate}% average
+              </StatusPill>
+            </div>
+
+            {/* 7-Day Bar Chart */}
+            <div className="flex h-[170px] items-end gap-3 border-b border-line pb-1 sm:gap-5">
+              {chartDays.map((cd, i) => (
+                <div key={i} className="group flex h-full flex-1 flex-col items-center justify-end gap-2">
+                  <span className="text-[10px] font-semibold text-[#8a97ad] opacity-0 transition group-hover:opacity-100">
+                    {cd.rate}%
+                  </span>
+                  <div
+                    className={`w-full max-w-[42px] rounded-t-lg transition-all ${
+                      i === chartDays.length - 1
+                        ? 'bg-cobalt'
+                        : 'bg-[#d9e2fb] group-hover:bg-[#aebbfa]'
+                    }`}
+                    style={{ height: `${Math.max(12, cd.rate)}%` }}
+                  />
+                  <span className="text-[10.5px] font-semibold text-[#9aa6b9]">{cd.label}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-5 grid grid-cols-3 divide-x divide-line">
+              <div className="px-2 text-center first:pl-0 last:pr-0">
+                <p className="font-display text-[17px] font-extrabold text-ink">{logs.length}</p>
+                <p className="mt-0.5 text-[10.5px] text-muted">Total submissions</p>
+              </div>
+              <div className="px-2 text-center first:pl-0 last:pr-0">
+                <p className="font-display text-[17px] font-extrabold text-mint">{passedLogsCount}</p>
+                <p className="mt-0.5 text-[10.5px] text-muted">Successful</p>
+              </div>
+              <div className="px-2 text-center first:pl-0 last:pr-0">
+                <p className="font-display text-[17px] font-extrabold text-[#d23f53]">
+                  {failedLogsCount}
+                </p>
+                <p className="mt-0.5 text-[10.5px] text-muted">Failures</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Dark Ink Schedule Card */}
+          <div className="sidebar-grain relative flex flex-col justify-between overflow-hidden rounded-[20px] bg-ink p-6 text-white shadow-[0_16px_40px_rgba(16,28,46,.18)]">
+            <div className="relative">
+              <div className="mb-5 flex items-center justify-between">
+                <span className="grid h-10 w-10 place-items-center rounded-xl bg-white/10 text-[#8fa6ff]">
+                  <CalendarClock size={19} />
+                </span>
+                <span className="pill bg-white/10 text-[#a7e9d8]">
+                  <span className="dot-live" /> Engine online
+                </span>
+              </div>
+              <p className="text-[11px] font-bold uppercase tracking-[.14em] text-[#8ba0c3]">
+                Next automated run
+              </p>
+              <p className="mt-2 font-display text-[30px] font-extrabold leading-none tracking-tight">
+                04:00 <span className="text-[16px] font-semibold text-[#9fb0cc]">UTC</span>
+              </p>
+              <p className="mt-2 text-[12px] text-[#a4b5d1]">
+                Daily · 09:00 AM PKT · {totalForms} forms queued
+              </p>
+            </div>
+            <div className="relative mt-8 space-y-3">
+              <div className="flex items-center justify-between rounded-xl bg-white/[.07] px-3.5 py-2.5 text-[11.5px]">
+                <span className="flex items-center gap-2 text-[#b7c6de]">
+                  <Database size={13} /> Database
+                </span>
+                <span className="font-semibold text-[#64dfba]">Connected</span>
+              </div>
+              <button
+                onClick={triggerRunAll}
+                className="btn btn-lg w-full !border-white/15 !bg-white !text-ink hover:!bg-[#eef2ff]"
               >
-                <Plus className="w-4 h-4 stroke-[3]" /> Add First Site
+                <Play size={14} className="fill-current text-cobalt" /> Run tests now{' '}
+                <ArrowRight size={14} />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Bottom Split: Sites in Rotation + Recent Activity */}
+        <div className="mt-5 grid gap-5 xl:grid-cols-2">
+          {/* Sites in Rotation */}
+          <div className="panel animate-rise overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
+              <div>
+                <h2 className="font-display text-[14px] font-bold text-ink">Sites in rotation</h2>
+                <p className="text-[11px] text-muted">Active client websites scheduled for daily checks</p>
+              </div>
+              <Link href="/sites/new" className="text-[11.5px] font-semibold text-cobalt hover:underline">
+                + Add site
               </Link>
             </div>
-          ) : (
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-surface-border bg-navy-900/50 text-slate-400 font-semibold uppercase tracking-wider">
-                  <th className="py-3 px-5">Site & Plugin</th>
-                  <th className="py-3 px-5">Status</th>
-                  <th className="py-3 px-5">Last Checked</th>
-                  <th className="py-3 px-5">Alert Routing</th>
-                  <th className="py-3 px-5 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-surface-border/60">
-                {filteredSites.map((site) => {
-                  const isTestingThis = testingSiteId === site._id;
-                  const prefs = site.notificationPreferences || {};
 
-                  return (
-                    <tr
-                      key={site._id}
-                      className="hover:bg-navy-800/60 transition-colors group"
-                    >
-                      {/* Name & URL & Monitored Forms */}
-                      <td className="py-4 px-5">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-semibold text-slate-100 text-sm">
-                            {site.name}
-                          </span>
-                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-accent/15 text-sky-accent border border-sky-accent/30">
-                            {site.forms && site.forms.length > 0 ? `${site.forms.length} Forms Monitored` : '1 Form Monitored'}
-                          </span>
-                        </div>
-                        <a
-                          href={site.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-[11px] text-sky-accent hover:underline flex items-center gap-1 mt-1 truncate max-w-xs sm:max-w-md"
-                        >
-                          {site.url} <ExternalLink className="w-3 h-3 shrink-0" />
-                        </a>
+            {/* Filter & Search Bar */}
+            <div className="flex items-center gap-2 border-b border-line bg-[#fafbfe] px-4 py-2.5">
+              <div className="relative flex-1">
+                <Search
+                  size={13}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#9aa6b9]"
+                />
+                <input
+                  className="field !h-8 !pl-8 text-[11.5px]"
+                  placeholder="Filter websites…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
+              <div className="flex items-center gap-1">
+                {(['all', 'healthy', 'failing'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => setSiteFilter(mode)}
+                    className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold capitalize transition ${
+                      siteFilter === mode ? 'bg-white text-ink shadow-sm' : 'text-[#8491a7] hover:text-ink'
+                    }`}
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-                        {site.forms && site.forms.length > 0 && (
-                          <div className="flex items-center gap-1.5 flex-wrap pt-1.5">
-                            {site.forms.slice(0, 3).map((f: any, fIdx: number) => (
-                              <span
-                                key={fIdx}
-                                className={`text-[10px] px-2 py-0.5 rounded border flex items-center gap-1 ${
-                                  f.lastStatus === 'healthy'
-                                    ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-300'
-                                    : f.lastStatus === 'failing'
-                                    ? 'bg-red-950/40 border-red-800/60 text-red-300'
-                                    : 'bg-navy-900 border-surface-border text-slate-400'
-                                }`}
-                              >
-                                <span
-                                  className={`w-1.5 h-1.5 rounded-full ${
-                                    f.lastStatus === 'healthy'
-                                      ? 'bg-emerald-400'
-                                      : f.lastStatus === 'failing'
-                                      ? 'bg-red-400'
-                                      : 'bg-slate-400'
-                                  }`}
-                                />
-                                {f.name}
-                              </span>
-                            ))}
-                            {site.forms.length > 3 && (
-                              <span className="text-[10px] text-slate-400 font-medium">
-                                +{site.forms.length - 3} more
-                              </span>
-                            )}
-                          </div>
-                        )}
-                      </td>
+            <div className="soft-scroll max-h-[360px] overflow-y-auto divide-y divide-line/70">
+              {filteredSites.map((site) => {
+                const isTesting = testingSiteId === site._id;
+                const formCount = site.forms?.length || 1;
+                const isHealthy = site.lastStatus === 'healthy';
+                const isFailing = site.lastStatus === 'failing';
+                const tone = isHealthy ? 'green' : isFailing ? 'red' : 'gray';
+                const statusLabel = isHealthy ? 'All passing' : isFailing ? 'Failing' : 'Pending';
 
-                      {/* Status Badge */}
-                      <td className="py-4 px-5">
-                        {site.lastStatus === 'healthy' ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                            Healthy (All Forms Passing)
-                          </span>
-                        ) : site.lastStatus === 'failing' ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-red-500/15 text-red-400 border border-red-500/30">
-                            <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse"></span>
-                            Failing
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-                            Pending
-                          </span>
-                        )}
-                      </td>
-
-                      {/* Last Checked */}
-                      <td className="py-4 px-5 text-slate-300">
-                        {site.lastCheckedAt ? (
-                          <div className="flex flex-col">
-                            <span className="font-medium text-slate-200">
-                              {new Date(site.lastCheckedAt).toLocaleTimeString([], {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })}
-                            </span>
-                            <span className="text-[10px] text-slate-400">
-                              {new Date(site.lastCheckedAt).toLocaleDateString()}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-slate-500 italic">Never tested</span>
-                        )}
-                      </td>
-
-                      {/* Notification Routing Icons */}
-                      <td className="py-4 px-5">
+                return (
+                  <div
+                    key={site._id}
+                    className="flex items-center justify-between gap-3 px-5 py-3.5 transition hover:bg-[#fafbfe]"
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#f0f3f9] text-[#71809a]">
+                        <Globe size={16} />
+                      </span>
+                      <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          {prefs.enableEmail !== false ? (
-                            <div
-                              title={
-                                prefs.useGlobalDefaults
-                                  ? 'Email alerts: Global Defaults'
-                                  : `Email alerts: Custom (${prefs.customEmails?.length || 0} recipients)`
-                              }
-                              className="p-1.5 rounded bg-sky-accent/10 text-sky-accent border border-sky-accent/20 cursor-help"
-                            >
-                              <Mail className="w-3.5 h-3.5" />
-                            </div>
-                          ) : (
-                            <div
-                              title="Email alerts disabled"
-                              className="p-1.5 rounded bg-slate-800 text-slate-500 border border-slate-700 cursor-help opacity-40"
-                            >
-                              <Mail className="w-3.5 h-3.5" />
-                            </div>
-                          )}
-
-                          {prefs.enableSlack !== false ? (
-                            <div
-                              title={
-                                prefs.useGlobalDefaults
-                                  ? 'Slack alerts: Global Webhook'
-                                  : 'Slack alerts: Site Custom Webhook'
-                              }
-                              className="p-1.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 cursor-help"
-                            >
-                              <MessageSquare className="w-3.5 h-3.5" />
-                            </div>
-                          ) : (
-                            <div
-                              title="Slack alerts disabled"
-                              className="p-1.5 rounded bg-slate-800 text-slate-500 border border-slate-700 cursor-help opacity-40"
-                            >
-                              <MessageSquare className="w-3.5 h-3.5" />
-                            </div>
-                          )}
-
-                          {prefs.useGlobalDefaults ? (
-                            <span className="text-[10px] text-slate-400">Global</span>
-                          ) : (
-                            <span className="text-[10px] text-sky-accent font-medium">Custom</span>
-                          )}
+                          <p className="truncate text-[12.5px] font-bold text-ink">{site.name}</p>
+                          <StatusPill tone={tone}>{statusLabel}</StatusPill>
                         </div>
-                      </td>
+                        <p className="truncate text-[11px] text-muted">
+                          {site.url.replace(/^https?:\/\//, '')} · {formCount} {formCount === 1 ? 'form' : 'forms'}
+                        </p>
+                      </div>
+                    </div>
 
-                      {/* Action Buttons */}
-                      <td className="py-4 px-5 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {/* Test Now Button */}
-                          <button
-                            onClick={() => handleTestSite(site._id, site.name)}
-                            disabled={isTestingThis}
-                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-200 bg-surface hover:bg-surface-hover border border-surface-border transition-colors disabled:opacity-50"
-                            title="Run Playwright test immediately"
-                          >
-                            {isTestingThis ? (
-                              <>
-                                <Loader2 className="w-3 h-3 animate-spin text-sky-accent" />
-                                <span>Testing...</span>
-                              </>
-                            ) : (
-                              <>
-                                <Play className="w-3 h-3 text-sky-accent fill-current" />
-                                <span>Test Now</span>
-                              </>
-                            )}
-                          </button>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        onClick={() => handleTestSite(site._id, site.name)}
+                        disabled={isTesting}
+                        className="btn btn-secondary btn-sm !h-8 px-2.5 text-[11px]"
+                        title="Test all forms on this site now"
+                      >
+                        {isTesting ? (
+                          <LoaderCircle size={12} className="animate-spin text-cobalt" />
+                        ) : (
+                          <Play size={11} className="text-cobalt fill-current" />
+                        )}
+                        <span className="hidden sm:inline">Test</span>
+                      </button>
+                      <Link
+                        href={`/sites/${site._id}`}
+                        className="grid h-8 w-8 place-items-center rounded-lg border border-line text-[#6b7b95] hover:border-cobalt hover:text-cobalt transition"
+                        title="Edit website configuration"
+                      >
+                        <Edit2 size={12} />
+                      </Link>
+                      <button
+                        onClick={() => handleDeleteSite(site._id, site.name)}
+                        className="grid h-8 w-8 place-items-center rounded-lg border border-line text-[#b3bdcd] hover:border-[#ffccd2] hover:bg-[#ffeded] hover:text-[#d64c59] transition"
+                        title="Delete site"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
 
-                          {/* Logs Link */}
-                          <Link
-                            href={`/logs?siteId=${site._id}`}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-surface border border-transparent hover:border-surface-border transition-colors"
-                            title="View Execution History"
-                          >
-                            <History className="w-3.5 h-3.5" />
-                          </Link>
+              {!filteredSites.length && (
+                <div className="p-8 text-center text-[12px] text-muted">
+                  {sites.length === 0
+                    ? 'No websites monitored yet. Click "+ Add site" to start.'
+                    : 'No websites match your filter.'}
+                </div>
+              )}
+            </div>
+          </div>
 
-                          {/* Edit Link */}
-                          <Link
-                            href={`/sites/${site._id}`}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-surface border border-transparent hover:border-surface-border transition-colors"
-                            title="Edit Configuration"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </Link>
+          {/* Recent Activity */}
+          <div className="panel animate-rise overflow-hidden">
+            <div className="flex items-center justify-between border-b border-line px-5 py-4">
+              <div>
+                <h2 className="font-display text-[14px] font-bold text-ink">Recent activity</h2>
+                <p className="text-[11px] text-muted">Automated & manual test submissions</p>
+              </div>
+              <Link href="/logs" className="text-[11.5px] font-semibold text-cobalt hover:underline">
+                View logs →
+              </Link>
+            </div>
 
-                          {/* Delete Button */}
-                          <button
-                            onClick={() => handleDeleteSite(site._id, site.name)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-surface border border-transparent hover:border-surface-border transition-colors"
-                            title="Delete Site"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
+            <div className="soft-scroll max-h-[410px] overflow-y-auto divide-y divide-line/70">
+              {logs.slice(0, 7).map((log) => {
+                const passed = log.status === 'passed';
+                const site = log.siteId || {};
+                const timeAgo = log.executedAt ? new Date(log.executedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now';
+
+                return (
+                  <button
+                    key={log._id}
+                    onClick={() => setActiveModalLog(log)}
+                    className="flex w-full items-center gap-3 px-5 py-3.5 text-left transition hover:bg-[#fafbfe]"
+                  >
+                    <span
+                      className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${
+                        passed ? 'bg-[#e7f8f2] text-mint' : 'bg-[#ffeded] text-[#dc5262]'
+                      }`}
+                    >
+                      {passed ? <CircleCheck size={16} /> : <CircleAlert size={16} />}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[12.5px] font-bold text-ink">
+                        {site.name || 'Automated Form Check'}
+                      </p>
+                      <p className="truncate text-[11px] text-muted">
+                        {log.formResults?.length ? `${log.formResults.length} forms verified` : site.url || 'Single form run'}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <StatusPill tone={passed ? 'green' : 'red'}>
+                        {passed ? 'Passed' : 'Failed'}
+                      </StatusPill>
+                      <p className="mt-1 text-[10.5px] text-[#9aa6b9]">{timeAgo}</p>
+                    </div>
+                    <ChevronRight size={14} className="text-[#b3bdcd]" />
+                  </button>
+                );
+              })}
+
+              {!logs.length && (
+                <div className="p-8 text-center text-[12px] text-muted">
+                  No tests recorded yet. Run a test to see results here.
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
       {/* Log Detail Modal */}
       {activeModalLog && (
-        <LogDetailModal
-          log={activeModalLog}
-          onClose={() => setActiveModalLog(null)}
-        />
+        <LogDetailModal log={activeModalLog} onClose={() => setActiveModalLog(null)} />
       )}
+
+      {/* Toast */}
+      <Toast notice={notice} onClose={() => setNotice(null)} />
     </div>
   );
 }
-

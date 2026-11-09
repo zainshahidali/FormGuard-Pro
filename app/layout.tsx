@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
-import Sidebar from '@/components/Sidebar';
-import Navbar from '@/components/Navbar';
+import AppShell from '@/components/AppShell';
 
 export const metadata: Metadata = {
   title: 'FormGuard Pro — Multi-Site WordPress Form Monitor',
@@ -16,14 +15,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="bg-navy-900 text-slate-100 min-h-screen flex antialiased">
-        <Sidebar />
-        <div className="flex-1 flex flex-col min-w-0">
-          <Navbar />
-          <main className="flex-1 p-8 overflow-y-auto">{children}</main>
-        </div>
+      <body className="min-h-screen bg-canvas text-ink antialiased font-sans selection:bg-cobalt/20 selection:text-cobaltdark">
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );
 }
-

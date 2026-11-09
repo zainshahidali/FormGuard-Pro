@@ -3,8 +3,8 @@
 import React from 'react';
 import {
   X,
-  CheckCircle2,
-  XCircle,
+  CircleCheck,
+  CircleAlert,
   Clock,
   Terminal,
   Image as ImageIcon,
@@ -12,7 +12,9 @@ import {
   MessageSquare,
   AlertOctagon,
   ExternalLink,
+  Download,
 } from 'lucide-react';
+import { StatusPill } from '@/components/ui';
 
 interface LogDetailModalProps {
   log: any;
@@ -26,43 +28,35 @@ export default function LogDetailModal({ log, onClose }: LogDetailModalProps) {
   const site = log.siteId || {};
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-navy-900/85 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-surface border border-surface-border rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col text-slate-100 overflow-hidden">
+    <div className="fixed inset-0 z-[75] grid place-items-center bg-ink/55 px-4 backdrop-blur-sm animate-fade-in">
+      <div className="animate-toast w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden rounded-[22px] bg-white shadow-[0_30px_90px_rgba(12,24,45,.3)] text-ink">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-border bg-navy-800 shrink-0">
+        <div className="flex items-center justify-between border-b border-line px-6 py-4.5 bg-[#fbfcfe] shrink-0">
           <div className="flex items-center gap-3">
-            {isPassed ? (
-              <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
-                <CheckCircle2 className="w-5 h-5" />
-              </div>
-            ) : (
-              <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400">
-                <XCircle className="w-5 h-5" />
-              </div>
-            )}
+            <span
+              className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${
+                isPassed ? 'bg-[#e7f8f2] text-mint' : 'bg-[#ffeded] text-[#dc5262]'
+              }`}
+            >
+              {isPassed ? <CircleCheck size={20} /> : <CircleAlert size={20} />}
+            </span>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-base text-white">
-                  {site.name || 'Monitored Form Test'}
+                <h3 className="font-display text-[15.5px] font-bold text-ink">
+                  {site.name || 'Test Execution Report'}
                 </h3>
-                <span
-                  className={`text-xs font-semibold px-2 py-0.5 rounded uppercase tracking-wider ${
-                    isPassed
-                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                      : 'bg-red-500/15 text-red-400 border border-red-500/30'
-                  }`}
-                >
-                  {log.status}
-                </span>
+                <StatusPill tone={isPassed ? 'green' : 'red'}>
+                  {log.status.toUpperCase()}
+                </StatusPill>
               </div>
               {site.url && (
                 <a
                   href={site.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-xs text-sky-accent hover:underline flex items-center gap-1 mt-0.5"
+                  className="mt-0.5 flex items-center gap-1 text-[11px] text-cobalt hover:underline"
                 >
-                  {site.url} <ExternalLink className="w-3 h-3" />
+                  {site.url} <ExternalLink size={11} />
                 </a>
               )}
             </div>
@@ -70,56 +64,57 @@ export default function LogDetailModal({ log, onClose }: LogDetailModalProps) {
 
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-surface-border/50 transition-colors"
+            className="rounded-lg p-1 text-[#9aa6b9] hover:bg-[#f0f3f9] hover:text-ink transition-colors"
+            aria-label="Close"
           >
-            <X className="w-5 h-5" />
+            <X size={18} />
           </button>
         </div>
 
         {/* Scrollable Body */}
-        <div className="p-6 space-y-6 overflow-y-auto">
+        <div className="soft-scroll overflow-y-auto p-6 space-y-6">
           {/* Metadata Row */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="bg-navy-800 p-3 rounded-lg border border-surface-border">
-              <span className="text-[11px] text-slate-400 flex items-center gap-1 font-medium">
-                <Clock className="w-3.5 h-3.5 text-slate-400" /> Duration
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="rounded-xl border border-line bg-[#f8fafd] p-3">
+              <span className="flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-wider text-[#8292aa]">
+                <Clock size={12} className="text-[#8292aa]" /> Duration
               </span>
-              <p className="text-sm font-semibold text-white mt-1">
+              <p className="mt-1 font-display text-[15px] font-extrabold text-ink">
                 {log.durationMs ? `${log.durationMs}ms` : 'N/A'}
               </p>
             </div>
 
-            <div className="bg-navy-800 p-3 rounded-lg border border-surface-border">
-              <span className="text-[11px] text-slate-400 flex items-center gap-1 font-medium">
+            <div className="rounded-xl border border-line bg-[#f8fafd] p-3">
+              <span className="text-[10.5px] font-bold uppercase tracking-wider text-[#8292aa]">
                 Executed At
               </span>
-              <p className="text-xs font-semibold text-white mt-1">
+              <p className="mt-1 text-[12px] font-semibold text-ink">
                 {log.executedAt ? new Date(log.executedAt).toLocaleString() : 'Just now'}
               </p>
             </div>
 
-            <div className="bg-navy-800 p-3 rounded-lg border border-surface-border">
-              <span className="text-[11px] text-slate-400 flex items-center gap-1 font-medium">
-                <Mail className="w-3.5 h-3.5 text-sky-accent" /> Email Alert
+            <div className="rounded-xl border border-line bg-[#f8fafd] p-3">
+              <span className="flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-wider text-[#8292aa]">
+                <Mail size={12} className="text-cobalt" /> Email Alert
               </span>
-              <p className="text-xs font-semibold mt-1">
+              <p className="mt-1 text-[12px] font-semibold">
                 {log.notificationsSent?.email ? (
-                  <span className="text-emerald-400">Dispatched</span>
+                  <span className="text-mint">Dispatched</span>
                 ) : (
-                  <span className="text-slate-400">Not Sent</span>
+                  <span className="text-[#9aa6b9]">Not Sent</span>
                 )}
               </p>
             </div>
 
-            <div className="bg-navy-800 p-3 rounded-lg border border-surface-border">
-              <span className="text-[11px] text-slate-400 flex items-center gap-1 font-medium">
-                <MessageSquare className="w-3.5 h-3.5 text-amber-400" /> Slack Alert
+            <div className="rounded-xl border border-line bg-[#f8fafd] p-3">
+              <span className="flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-wider text-[#8292aa]">
+                <MessageSquare size={12} className="text-[#d79b2d]" /> Slack Alert
               </span>
-              <p className="text-xs font-semibold mt-1">
+              <p className="mt-1 text-[12px] font-semibold">
                 {log.notificationsSent?.slack ? (
-                  <span className="text-emerald-400">Dispatched</span>
+                  <span className="text-mint">Dispatched</span>
                 ) : (
-                  <span className="text-slate-400">Not Sent</span>
+                  <span className="text-[#9aa6b9]">Not Sent</span>
                 )}
               </p>
             </div>
@@ -127,43 +122,42 @@ export default function LogDetailModal({ log, onClose }: LogDetailModalProps) {
 
           {/* Multi-Form Test Results Breakdown */}
           {log.formResults && log.formResults.length > 0 && (
-            <div className="space-y-2">
-              <label className="text-xs font-semibold uppercase tracking-wider text-sky-accent flex items-center justify-between">
-                <span>Forms Tested on this Website ({log.formResults.length})</span>
-                <span className="text-[11px] text-slate-400 font-normal">
-                  {log.formResults.filter((f: any) => f.status === 'passed').length}/{log.formResults.length} passed
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-cobalt">
+                  Forms Tested on this Website ({log.formResults.length})
                 </span>
-              </label>
+                <span className="text-[11px] text-muted">
+                  {log.formResults.filter((f: any) => f.status === 'passed').length}/
+                  {log.formResults.length} passed
+                </span>
+              </div>
               <div className="space-y-2">
                 {log.formResults.map((fr: any, idx: number) => {
                   const frPassed = fr.status === 'passed';
                   return (
                     <div
                       key={fr.formId || idx}
-                      className={`p-3 rounded-lg border text-xs flex flex-col gap-1.5 ${
+                      className={`rounded-xl border p-3.5 text-xs flex flex-col gap-1.5 ${
                         frPassed
-                          ? 'bg-emerald-950/20 border-emerald-900/50 text-emerald-200'
-                          : 'bg-red-950/30 border-red-900/60 text-red-200'
+                          ? 'border-[#c6ebde] bg-[#f2fbf7]'
+                          : 'border-[#ffccd2] bg-[#fff4f6]'
                       }`}
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <span
-                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                              frPassed ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
-                            }`}
-                          >
+                          <StatusPill tone={frPassed ? 'green' : 'red'}>
                             {fr.status.toUpperCase()}
-                          </span>
-                          <span className="font-semibold text-white">{fr.formName}</span>
+                          </StatusPill>
+                          <span className="font-semibold text-ink">{fr.formName}</span>
                         </div>
-                        <span className="text-slate-400 font-mono text-[11px]">{fr.durationMs}ms</span>
+                        <span className="font-mono text-[11px] text-[#8492a6]">{fr.durationMs}ms</span>
                       </div>
-                      <div className="text-[11px] text-slate-400 truncate">
+                      <div className="truncate text-[11px] text-[#6b7c96]">
                         🔗 {fr.pageUrl}
                       </div>
                       {fr.errorMessage && (
-                        <div className="text-[11px] text-red-300 font-mono bg-red-950/60 p-2 rounded mt-1">
+                        <div className="mt-1 rounded-lg bg-[#ffe8ec] p-2.5 font-mono text-[11px] text-[#c93448]">
                           {fr.errorMessage}
                         </div>
                       )}
@@ -177,10 +171,10 @@ export default function LogDetailModal({ log, onClose }: LogDetailModalProps) {
           {/* Failure Error Message */}
           {!isPassed && log.errorMessage && (
             <div className="space-y-2">
-              <label className="text-xs font-semibold uppercase tracking-wider text-red-400 flex items-center gap-1.5">
-                <AlertOctagon className="w-4 h-4" /> Failure Step & Reason
-              </label>
-              <div className="p-4 rounded-lg bg-red-950/40 border border-red-900/60 text-red-200 text-sm font-mono leading-relaxed break-words">
+              <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-[#d23f53]">
+                <AlertOctagon size={13} /> Failure Step & Reason
+              </span>
+              <div className="break-words rounded-xl border border-[#ffccd2] bg-[#fff2f4] p-4 font-mono text-[11.5px] leading-relaxed text-[#c93448]">
                 {log.errorMessage}
               </div>
             </div>
@@ -189,12 +183,12 @@ export default function LogDetailModal({ log, onClose }: LogDetailModalProps) {
           {/* Captured Browser Console Errors */}
           {log.consoleErrors && log.consoleErrors.length > 0 && (
             <div className="space-y-2">
-              <label className="text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-                <Terminal className="w-4 h-4 text-sky-accent" /> Captured Browser Console Errors
-              </label>
-              <div className="p-4 rounded-lg bg-navy-800 border border-surface-border text-xs font-mono text-slate-300 space-y-1.5 max-h-48 overflow-y-auto">
+              <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-ink">
+                <Terminal size={13} className="text-cobalt" /> Captured Browser Console Errors
+              </span>
+              <div className="soft-scroll max-h-44 space-y-1 overflow-y-auto rounded-xl border border-line bg-[#f8fafd] p-3.5 font-mono text-[11px] text-[#556783]">
                 {log.consoleErrors.map((err: string, i: number) => (
-                  <div key={i} className="text-amber-300/90 leading-tight">
+                  <div key={i} className="leading-tight text-[#c25026]">
                     {err}
                   </div>
                 ))}
@@ -205,44 +199,40 @@ export default function LogDetailModal({ log, onClose }: LogDetailModalProps) {
           {/* Failure Screenshot */}
           {log.screenshotBase64 ? (
             <div className="space-y-2">
-              <label className="text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
-                  <ImageIcon className="w-4 h-4 text-sky-accent" /> Failure Viewport Screenshot
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-ink">
+                  <ImageIcon size={13} className="text-cobalt" /> Failure Viewport Screenshot
                 </span>
                 <a
                   href={`data:image/png;base64,${log.screenshotBase64}`}
-                  download={`failure-${site.name || 'log'}.png`}
-                  className="text-xs text-sky-accent hover:underline lowercase font-normal"
+                  download={`failure-${site.name || 'test'}.png`}
+                  className="flex items-center gap-1 text-[11.5px] font-semibold text-cobalt hover:underline"
                 >
-                  Download image
+                  <Download size={12} /> Download image
                 </a>
-              </label>
-              <div className="border border-surface-border rounded-lg overflow-hidden bg-navy-800 p-2">
+              </div>
+              <div className="overflow-hidden rounded-xl border border-line bg-[#fbfcfe] p-2">
                 <img
                   src={`data:image/png;base64,${log.screenshotBase64}`}
                   alt="Failure Viewport Screenshot"
-                  className="w-full h-auto rounded border border-surface-border shadow"
+                  className="h-auto w-full rounded-lg border border-line shadow-sm"
                 />
               </div>
             </div>
           ) : !isPassed ? (
-            <div className="text-xs text-slate-500 italic p-4 bg-navy-800 rounded-lg border border-surface-border text-center">
+            <div className="rounded-xl border border-line bg-[#fbfcfe] p-4 text-center text-[11.5px] italic text-muted">
               No screenshot captured for this test run.
             </div>
           ) : null}
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end px-6 py-4 border-t border-surface-border bg-navy-800 shrink-0">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-surface hover:bg-surface-hover border border-surface-border transition-colors"
-          >
-            Close Details
+        <div className="flex items-center justify-end border-t border-line bg-[#fbfcfe] px-6 py-4 shrink-0">
+          <button onClick={onClose} className="btn btn-secondary btn-sm">
+            Close details
           </button>
         </div>
       </div>
     </div>
   );
 }
-
