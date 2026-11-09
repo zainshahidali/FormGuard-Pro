@@ -1,0 +1,64 @@
+name: FormGuard Pro — Automated Daily Form Monitor
+
+on:
+  schedule:
+    # Runs everyday at 04:00 UTC (09:00 AM PKT)
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+    inputs:
+      execution_mode:
+        description: 'Execution Mode'
+        required: true
+        default: 'standalone_playwright'
+        type: choice
+        options:
+          - 'standalone_playwright'
+          - 'http_api_trigger'
+
+jobs:
+  monitor-forms:
+    name: Run Multi-Site Form Health Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      # Path 1: Standalone Playwright Execution (Recommended for GitHub Actions: no serverless timeout, native Chromium)
+      - name: Install Playwright Chromium with System Dependencies
+        if: "${{ github.event_name == 'schedule' || inputs.execution_mode == 'standalone_playwright' }}"
+        run: npx playwright install --with-deps chromium
+
+      - name: Execute Standalone Form Health Check Runner
+        if: "${{ github.event_name == 'schedule' || inputs.execution_mode == 'standalone_playwright' }}"
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          NOTIFICATION_EMAIL: ${{ secrets.NOTIFICATION_EMAIL }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
+        run: node scripts/cron-runner.mjs
+
+      # Path 2: HTTP API Trigger (Alternative if deployed on Vercel/VPS with long execution enabled)
+      - name: Trigger Webhook API Run-All Endpoint
+        if: "${{ github.event_name == 'workflow_dispatch' && inputs.execution_mode == 'http_api_trigger' }}"
+        run: |
+          curl -X POST "${{ secrets.NEXT_PUBLIC_APP_URL }}/api/test/run-all" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            --fail
+
