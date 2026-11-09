@@ -1,5 +1,16 @@
 import mongoose, { Schema, Document, Model, Types } from 'mongoose';
 
+export interface IFormTestResult {
+  formId?: string;
+  formName: string;
+  pageUrl: string;
+  status: 'passed' | 'failed';
+  durationMs: number;
+  errorMessage?: string;
+  consoleErrors?: string[];
+  screenshotBase64?: string;
+}
+
 export interface ITestLog extends Document {
   siteId: Types.ObjectId;
   status: 'passed' | 'failed';
@@ -7,6 +18,7 @@ export interface ITestLog extends Document {
   errorMessage?: string;
   consoleErrors: string[];
   screenshotBase64?: string;
+  formResults?: IFormTestResult[];
   notificationsSent: {
     email: boolean;
     slack: boolean;
@@ -44,6 +56,21 @@ const TestLogSchema = new Schema<ITestLog>(
     screenshotBase64: {
       type: String,
       default: '',
+    },
+    formResults: {
+      type: [
+        {
+          formId: String,
+          formName: String,
+          pageUrl: String,
+          status: { type: String, enum: ['passed', 'failed'] },
+          durationMs: Number,
+          errorMessage: String,
+          consoleErrors: [String],
+          screenshotBase64: String,
+        },
+      ],
+      default: [],
     },
     notificationsSent: {
       email: { type: Boolean, default: false },

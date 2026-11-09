@@ -17,9 +17,14 @@ import {
   MessageSquare,
   Globe,
   Settings,
+  Layers,
+  CheckSquare,
+  Square,
+  ExternalLink,
+  ChevronRight,
 } from 'lucide-react';
 import { FORM_PRESETS } from '@/lib/presets';
-import { IFormField } from '@/models/Site';
+import { IFormField, IFormItem } from '@/models/Site';
 
 interface SiteFormProps {
   initialData?: any;
@@ -32,30 +37,39 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
   // Basic Info
   const [name, setName] = useState(initialData?.name || '');
   const [url, setUrl] = useState(initialData?.url || '');
-  const [formPluginType, setFormPluginType] = useState<string>(
-    initialData?.formPluginType || 'Elementor Pro'
-  );
   const [isActive, setIsActive] = useState<boolean>(
     initialData?.isActive !== undefined ? initialData.isActive : true
   );
 
-  // Form Fields
-  const [fields, setFields] = useState<IFormField[]>(
-    initialData?.fields?.length > 0
-      ? initialData.fields
-      : FORM_PRESETS['Elementor Pro'].fields
-  );
+  // Initialize Forms List (supports multi-form and legacy single-form sites)
+  const initialFormsList: IFormItem[] =
+    initialData?.forms && initialData.forms.length > 0
+      ? initialData.forms
+      : [
+          {
+            id: 'form-' + Math.random().toString(36).substring(2, 9),
+            name: initialData?.name ? `${initialData.name} Form` : 'Primary Contact Form',
+            pageUrl: initialData?.url || '',
+            formPluginType: initialData?.formPluginType || 'Elementor Pro',
+            fields:
+              initialData?.fields?.length > 0
+                ? initialData.fields
+                : FORM_PRESETS['Elementor Pro'].fields,
+            submitButtonSelector:
+              initialData?.submitButtonSelector ||
+              FORM_PRESETS['Elementor Pro'].submitButtonSelector,
+            verificationMethod:
+              initialData?.verificationMethod ||
+              FORM_PRESETS['Elementor Pro'].verificationMethod,
+            expectedSuccessValue:
+              initialData?.expectedSuccessValue ||
+              FORM_PRESETS['Elementor Pro'].expectedSuccessValue,
+            isActive: true,
+          },
+        ];
 
-  // Submission & Verification
-  const [submitButtonSelector, setSubmitButtonSelector] = useState(
-    initialData?.submitButtonSelector || FORM_PRESETS['Elementor Pro'].submitButtonSelector
-  );
-  const [verificationMethod, setVerificationMethod] = useState<'text_visible' | 'selector_visible' | 'url_redirect'>(
-    initialData?.verificationMethod || FORM_PRESETS['Elementor Pro'].verificationMethod
-  );
-  const [expectedSuccessValue, setExpectedSuccessValue] = useState(
-    initialData?.expectedSuccessValue || FORM_PRESETS['Elementor Pro'].expectedSuccessValue
-  );
+  const [forms, setForms] = useState<IFormItem[]>(initialFormsList);
+  const [activeFormIndex, setActiveFormIndex] = useState<number>(0);
 
   // Notification Preferences
   const [useGlobalDefaults, setUseGlobalDefaults] = useState(
@@ -89,40 +103,161 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
   const [isDetecting, setIsDetecting] = useState(false);
   const [detectMode, setDetectMode] = useState<'single' | 'deep' | null>(null);
   const [detectedFormsList, setDetectedFormsList] = useState<any[]>([]);
-  const [selectedFormIndex, setSelectedFormIndex] = useState<number | null>(null);
+  const [checkedDiscoveredIndices, setCheckedDiscoveredIndices] = useState<Record<number, boolean>>({});
   const [testResult, setTestResult] = useState<any>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [presetNotice, setPresetNotice] = useState<string | null>(null);
+  const [noticeMsg, setNoticeMsg] = useState<string | null>(null);
 
-  // Apply a selected detected form
-  const applyDetectedForm = (form: any, index: number) => {
-    setSelectedFormIndex(index);
-    if (form.pageUrl && form.pageUrl !== url) {
-      setUrl(form.pageUrl);
-    }
-    if (form.detectedPlugin) {
-      setFormPluginType(form.detectedPlugin);
-    }
-    if (form.fields && form.fields.length > 0) {
-      setFields(form.fields);
-    }
-    if (form.submitButtonSelector) {
-      setSubmitButtonSelector(form.submitButtonSelector);
-    }
-    if (form.verificationMethod) {
-      setVerificationMethod(form.verificationMethod);
-    }
-    if (form.expectedSuccessValue) {
-      setExpectedSuccessValue(form.expectedSuccessValue);
-    }
+  // Safe pointer to currently active form
+  const activeForm: IFormItem =
+    forms[activeFormIndex] ||
+    forms[0] || {
+      id: 'default',
+      name: 'Form',
+      pageUrl: url,
+      formPluginType: 'Custom',
+      fields: [],
+      submitButtonSelector: 'button[type="submit"]',
+      verificationMethod: 'text_visible',
+      expectedSuccessValue: 'Thank you',
+      isActive: true,
+    };
 
-    setPresetNotice(
-      `✨ Loaded form "${form.title || form.detectedPlugin}" from ${form.pageTitle ? `"${form.pageTitle}"` : form.pageUrl || 'page'} with ${form.fields?.length || 0} input fields! Check the fields below to customize test values.`
-    );
-    setTimeout(() => setPresetNotice(null), 6000);
+  // Helper to show temporary flash notice
+  const flashNotice = (msg: string) => {
+    setNoticeMsg(msg);
+    setTimeout(() => setNoticeMsg(null), 5000);
   };
 
-  // Auto-Detect all form fields and selectors from live URL using Playwright
+  // Update a property of the currently active form
+  const updateActiveForm = (key: keyof IFormItem, value: any) => {
+    setForms((prevForms) => {
+      const updated = [...prevForms];
+      if (updated[activeFormIndex]) {
+        updated[activeFormIndex] = {
+          ...updated[activeFormIndex],
+          [key]: value,
+        };
+      }
+      return updated;
+    });
+  };
+
+  // Apply a preset to the active form
+  const handleApplyPresetToActiveForm = (presetKey: string) => {
+    const preset = FORM_PRESETS[presetKey];
+    if (!preset) return;
+
+    setForms((prevForms) => {
+      const updated = [...prevForms];
+      if (updated[activeFormIndex]) {
+        updated[activeFormIndex] = {
+          ...updated[activeFormIndex],
+          formPluginType: preset.pluginType,
+          submitButtonSelector: preset.submitButtonSelector,
+          verificationMethod: preset.verificationMethod,
+          expectedSuccessValue: preset.expectedSuccessValue,
+          fields: [...preset.fields],
+        };
+      }
+      return updated;
+    });
+
+    flashNotice(`Loaded presets for ${presetKey} into "${activeForm.name}"`);
+  };
+
+  // Field Management for Active Form
+  const handleAddFieldToActiveForm = () => {
+    setForms((prevForms) => {
+      const updated = [...prevForms];
+      if (updated[activeFormIndex]) {
+        const curFields = updated[activeFormIndex].fields || [];
+        updated[activeFormIndex] = {
+          ...updated[activeFormIndex],
+          fields: [
+            ...curFields,
+            {
+              label: 'New Field',
+              selector: 'input[name=""]',
+              type: 'text',
+              testValue: '',
+            },
+          ],
+        };
+      }
+      return updated;
+    });
+  };
+
+  const handleUpdateActiveFormField = (
+    fIdx: number,
+    key: keyof IFormField,
+    value: any
+  ) => {
+    setForms((prevForms) => {
+      const updated = [...prevForms];
+      if (updated[activeFormIndex]) {
+        const curFields = [...(updated[activeFormIndex].fields || [])];
+        if (curFields[fIdx]) {
+          curFields[fIdx] = { ...curFields[fIdx], [key]: value };
+          updated[activeFormIndex] = {
+            ...updated[activeFormIndex],
+            fields: curFields,
+          };
+        }
+      }
+      return updated;
+    });
+  };
+
+  const handleRemoveActiveFormField = (fIdx: number) => {
+    setForms((prevForms) => {
+      const updated = [...prevForms];
+      if (updated[activeFormIndex]) {
+        const curFields = updated[activeFormIndex].fields || [];
+        updated[activeFormIndex] = {
+          ...updated[activeFormIndex],
+          fields: curFields.filter((_, i) => i !== fIdx),
+        };
+      }
+      return updated;
+    });
+  };
+
+  // Add another form to the website manually
+  const handleAddNewForm = () => {
+    const newForm: IFormItem = {
+      id: 'form-' + Math.random().toString(36).substring(2, 9),
+      name: `Form #${forms.length + 1}`,
+      pageUrl: url || '',
+      formPluginType: 'Elementor Pro',
+      fields: [...FORM_PRESETS['Elementor Pro'].fields],
+      submitButtonSelector: FORM_PRESETS['Elementor Pro'].submitButtonSelector,
+      verificationMethod: FORM_PRESETS['Elementor Pro'].verificationMethod,
+      expectedSuccessValue: FORM_PRESETS['Elementor Pro'].expectedSuccessValue,
+      isActive: true,
+    };
+
+    setForms([...forms, newForm]);
+    setActiveFormIndex(forms.length);
+    flashNotice(`Added new blank form to "${name || 'Website'}".`);
+  };
+
+  // Remove a form from the website
+  const handleDeleteForm = (indexToDelete: number) => {
+    if (forms.length <= 1) {
+      setErrorMsg('A website must have at least one monitored form.');
+      return;
+    }
+    const filtered = forms.filter((_, i) => i !== indexToDelete);
+    setForms(filtered);
+    if (activeFormIndex >= filtered.length) {
+      setActiveFormIndex(filtered.length - 1);
+    }
+    flashNotice('Form removed from website monitoring.');
+  };
+
+  // Crawl & Detect Forms
   const handleAutoDetect = async (isDeep: boolean = false) => {
     if (!url.trim() || !url.startsWith('http')) {
       setErrorMsg('Please enter a valid page or website URL (starting with http:// or https://) first.');
@@ -133,7 +268,7 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
     setDetectMode(isDeep ? 'deep' : 'single');
     setErrorMsg(null);
     setDetectedFormsList([]);
-    setSelectedFormIndex(null);
+    setCheckedDiscoveredIndices({});
 
     try {
       const res = await fetch('/api/sites/inspect-url', {
@@ -144,20 +279,26 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
 
       const json = await res.json();
       if (!res.ok || !json.success) {
-        throw new Error(json.error || 'Failed to inspect page form.');
+        throw new Error(json.error || 'Failed to inspect website for forms.');
       }
 
-      const forms = json.forms || (json.data ? [json.data] : []);
-      if (forms.length === 0) {
+      const discovered = json.forms || (json.data ? [json.data] : []);
+      if (discovered.length === 0) {
         throw new Error('No forms detected on this website/page.');
       }
 
-      setDetectedFormsList(forms);
+      setDetectedFormsList(discovered);
 
-      // Auto-populate the first form immediately
-      applyDetectedForm(forms[0], 0);
+      // Default check forms that have at least 1 input
+      const initialChecked: Record<number, boolean> = {};
+      discovered.forEach((df: any, idx: number) => {
+        if (df.fields && df.fields.length > 0) {
+          initialChecked[idx] = true;
+        }
+      });
+      setCheckedDiscoveredIndices(initialChecked);
 
-      // Auto-suggest name from domain if empty
+      // Auto-suggest website name if empty
       if (!name.trim()) {
         try {
           const parsedUrl = new URL(url.trim());
@@ -168,6 +309,8 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
           }
         } catch {}
       }
+
+      flashNotice(`Discovered ${discovered.length} forms across the website! Select which forms you want to monitor below.`);
     } catch (detectErr: any) {
       setErrorMsg(detectErr.message || 'Auto-detection failed.');
     } finally {
@@ -176,45 +319,45 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
     }
   };
 
-  // Apply Preset
-  const handleApplyPreset = (presetKey: string) => {
-    const preset = FORM_PRESETS[presetKey];
-    if (!preset) return;
-
-    setFormPluginType(preset.pluginType);
-    setSubmitButtonSelector(preset.submitButtonSelector);
-    setVerificationMethod(preset.verificationMethod);
-    setExpectedSuccessValue(preset.expectedSuccessValue);
-    setFields([...preset.fields]);
-
-    setPresetNotice(`Loaded standard presets for ${presetKey}`);
-    setTimeout(() => setPresetNotice(null), 4000);
+  // Toggle checkbox for a discovered form
+  const toggleDiscoveredCheck = (idx: number) => {
+    setCheckedDiscoveredIndices((prev) => ({
+      ...prev,
+      [idx]: !prev[idx],
+    }));
   };
 
-  // Field Management
-  const handleAddField = () => {
-    setFields([
-      ...fields,
-      {
-        label: 'New Field',
-        selector: 'input[name=""]',
-        type: 'text',
-        testValue: '',
-      },
-    ]);
+  // Import all checked discovered forms into the website
+  const handleImportCheckedForms = () => {
+    const selectedForms = detectedFormsList.filter((_, idx) => checkedDiscoveredIndices[idx]);
+
+    if (selectedForms.length === 0) {
+      setErrorMsg('Please select at least one form to import.');
+      return;
+    }
+
+    const convertedForms: IFormItem[] = selectedForms.map((df, i) => {
+      const cleanTitle = df.title || `${df.pageTitle || 'Page'} Form #${i + 1}`;
+      return {
+        id: df.id || 'form-' + Math.random().toString(36).substring(2, 9),
+        name: cleanTitle,
+        pageUrl: df.pageUrl || url,
+        formPluginType: df.detectedPlugin || 'Custom',
+        fields: df.fields || [],
+        submitButtonSelector: df.submitButtonSelector || 'button[type="submit"]',
+        verificationMethod: df.verificationMethod || 'text_visible',
+        expectedSuccessValue: df.expectedSuccessValue || 'Thank you',
+        isActive: true,
+      };
+    });
+
+    setForms(convertedForms);
+    setActiveFormIndex(0);
+    setDetectedFormsList([]); // close the import drawer once imported
+    flashNotice(`Successfully imported ${convertedForms.length} forms into ${name || 'Website'}! You can customize each form's fields below.`);
   };
 
-  const handleUpdateField = (index: number, key: keyof IFormField, value: any) => {
-    const updated = [...fields];
-    updated[index] = { ...updated[index], [key]: value };
-    setFields(updated);
-  };
-
-  const handleRemoveField = (index: number) => {
-    setFields(fields.filter((_, i) => i !== index));
-  };
-
-  // Save Site
+  // Save Website with All Forms
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
@@ -222,18 +365,32 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
 
     try {
       if (!name.trim()) throw new Error('Site name is required.');
-      if (!url.trim()) throw new Error('Target form URL is required.');
-      if (!submitButtonSelector.trim()) throw new Error('Submit button selector is required.');
-      if (!expectedSuccessValue.trim()) throw new Error('Expected success verification value is required.');
+      if (!url.trim()) throw new Error('Website URL is required.');
+      if (forms.length === 0) throw new Error('At least one form must be added to the website.');
+
+      // Validate each form
+      for (let i = 0; i < forms.length; i++) {
+        const f = forms[i];
+        if (!f.name?.trim()) throw new Error(`Form #${i + 1} requires a name.`);
+        if (!f.pageUrl?.trim()) throw new Error(`Form "${f.name}" requires a page URL.`);
+        if (!f.submitButtonSelector?.trim())
+          throw new Error(`Form "${f.name}" requires a submit button selector.`);
+        if (!f.expectedSuccessValue?.trim())
+          throw new Error(`Form "${f.name}" requires an expected verification value.`);
+      }
+
+      const primaryForm = forms[0];
 
       const payload = {
         name: name.trim(),
         url: url.trim(),
-        formPluginType,
-        fields,
-        submitButtonSelector: submitButtonSelector.trim(),
-        verificationMethod,
-        expectedSuccessValue: expectedSuccessValue.trim(),
+        forms,
+        // Backward compatibility top-level fields:
+        formPluginType: primaryForm.formPluginType,
+        fields: primaryForm.fields,
+        submitButtonSelector: primaryForm.submitButtonSelector,
+        verificationMethod: primaryForm.verificationMethod,
+        expectedSuccessValue: primaryForm.expectedSuccessValue,
         isActive,
         notificationPreferences: {
           useGlobalDefaults,
@@ -304,95 +461,69 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
 
   return (
     <form onSubmit={handleSubmit} className="space-y-8 max-w-5xl mx-auto pb-16">
-      {/* Preset Banner Notice */}
-      {presetNotice && (
-        <div className="bg-sky-500/15 border border-sky-500/30 p-3.5 rounded-lg text-sky-accent text-sm flex items-center gap-2 animate-in fade-in duration-200">
-          <Sparkles className="w-4 h-4 shrink-0" />
-          <span>{presetNotice}</span>
-        </div>
-      )}
-
+      {/* Notifications / Error Banner */}
       {errorMsg && (
-        <div className="bg-red-950/60 border border-red-800 p-4 rounded-lg text-red-200 text-sm flex items-start gap-3">
+        <div className="p-4 rounded-xl bg-red-950/60 border border-red-800 text-red-200 flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
-          <div>
+          <div className="text-sm">
             <span className="font-semibold block">Configuration Error</span>
             <span className="text-xs opacity-90">{errorMsg}</span>
           </div>
         </div>
       )}
 
-      {/* SECTION 1: Site General Details & Preset Quick-Select */}
+      {noticeMsg && (
+        <div className="p-4 rounded-xl bg-sky-950/60 border border-sky-800 text-sky-200 flex items-center gap-3 animate-in fade-in duration-300">
+          <Sparkles className="w-5 h-5 text-sky-400 shrink-0" />
+          <span className="text-sm font-medium">{noticeMsg}</span>
+        </div>
+      )}
+
+      {/* SECTION 1: Website General Details & Deep Multi-Page Scanner */}
       <div className="bg-surface border border-surface-border rounded-xl p-6 space-y-6">
         <div>
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-            <Globe className="w-5 h-5 text-sky-accent" /> Website Information & Preset Helper
+            <Globe className="w-5 h-5 text-sky-accent" /> Website Information & Multi-Form Crawler
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Specify the client WordPress URL and optionally select a plugin preset to pre-fill common selectors.
+            Specify the client website. FormGuard Pro will automatically crawl internal pages (Contact, Quote, Services) to find and test all forms.
           </p>
-        </div>
-
-        {/* Preset Selector Buttons */}
-        <div className="space-y-2">
-          <label className="text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5 text-sky-accent" /> Auto-Populate Plugin Presets
-          </label>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
-            {Object.keys(FORM_PRESETS).map((presetKey) => (
-              <button
-                key={presetKey}
-                type="button"
-                onClick={() => handleApplyPreset(presetKey)}
-                className={`px-3 py-2 rounded-lg text-xs font-medium border text-center transition-all ${
-                  formPluginType === presetKey
-                    ? 'bg-sky-accent/20 border-sky-accent text-sky-accent shadow-sm'
-                    : 'bg-navy-800 border-surface-border text-slate-300 hover:border-slate-500 hover:text-white'
-                }`}
-              >
-                {presetKey}
-              </button>
-            ))}
-          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-slate-300">
-              Site Name <span className="text-red-400">*</span>
+              Client Website Name <span className="text-red-400">*</span>
             </label>
             <input
               type="text"
               required
-              placeholder="e.g. Stow Line Roofing"
+              placeholder="e.g. Skin Creation or Extreme Roofing"
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-accent transition-colors"
             />
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-300">
-              Form Plugin Type
-            </label>
-            <select
-              value={formPluginType}
-              onChange={(e) => setFormPluginType(e.target.value)}
-              className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-sky-accent transition-colors"
-            >
-              <option value="Elementor Pro">Elementor Pro</option>
-              <option value="Contact Form 7">Contact Form 7</option>
-              <option value="MetForm">MetForm</option>
-              <option value="WPForms">WPForms</option>
-              <option value="Gravity Forms">Gravity Forms</option>
-              <option value="Custom">Custom / Other</option>
-            </select>
+          <div className="space-y-1.5 flex flex-col justify-end">
+            <div className="flex items-center gap-2 pb-2">
+              <input
+                type="checkbox"
+                id="isActive"
+                checked={isActive}
+                onChange={(e) => setIsActive(e.target.checked)}
+                className="w-4 h-4 rounded border-surface-border text-sky-accent focus:ring-0 bg-navy-800 cursor-pointer"
+              />
+              <label htmlFor="isActive" className="text-xs text-slate-300 cursor-pointer select-none">
+                Active Daily Website Monitoring (include all forms in daily cron runs)
+              </label>
+            </div>
           </div>
 
           <div className="md:col-span-2 space-y-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <label className="text-xs font-medium text-slate-300">
-                Target Website / Page URL <span className="text-red-400">*</span>
+                Target Website URL (Homepage or Form Page) <span className="text-red-400">*</span>
               </label>
               <div className="flex items-center gap-2">
                 <button
@@ -422,7 +553,7 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
                 >
                   {isDetecting && detectMode === 'deep' ? (
                     <>
-                      <Loader2 className="w-3 h-3 animate-spin text-white" /> Crawling Entire Website...
+                      <Loader2 className="w-3 h-3 animate-spin text-white" /> Crawling All Pages...
                     </>
                   ) : (
                     <>
@@ -435,467 +566,512 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
             <input
               type="url"
               required
-              placeholder="https://example.com/ (Enter homepage or specific page URL)"
+              placeholder="https://example.com/ (Enter homepage URL)"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-accent transition-colors"
             />
             <p className="text-[11px] text-slate-400">
-              💡 Tip: Enter the homepage URL and click <strong>&quot;Deep Crawl Entire Website&quot;</strong> to automatically scan all pages (Contact, Services, Quotes) and list every form found.
+              💡 Tip: Enter the homepage URL and click <strong>&quot;Deep Crawl Entire Website&quot;</strong>. FormGuard will crawl all sub-pages and allow you to monitor all client contact forms in 1 click!
             </p>
 
-            {/* Live Detected Forms Picker */}
+            {/* Live Detected Forms Checklist Drawer */}
             {detectedFormsList.length > 0 && (
-              <div className="pt-3 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-sky-accent flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5" /> Discovered Forms ({detectedFormsList.length})
-                  </span>
-                  <span className="text-[11px] text-slate-400">
-                    Click any form to auto-load its page URL, plugin type & fields
-                  </span>
+              <div className="pt-3 p-4 bg-navy-950 border border-sky-accent/30 rounded-xl space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-surface-border pb-2.5">
+                  <div>
+                    <span className="text-xs font-bold text-sky-accent flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5" /> Discovered Forms across Website ({detectedFormsList.length})
+                    </span>
+                    <p className="text-[11px] text-slate-400">
+                      Check the forms you want to monitor, then click &quot;Import Selected Forms&quot;.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleImportCheckedForms}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-navy-900 bg-sky-accent hover:bg-sky-400 shadow transition-all"
+                  >
+                    <Plus className="w-3.5 h-3.5 stroke-[3]" /> Import Selected Forms (
+                    {Object.values(checkedDiscoveredIndices).filter(Boolean).length})
+                  </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                  {detectedFormsList.map((df, fIdx) => (
-                    <button
-                      key={df.id || fIdx}
-                      type="button"
-                      onClick={() => applyDetectedForm(df, fIdx)}
-                      className={`p-3.5 rounded-lg border text-left transition-all flex items-start justify-between gap-3 ${
-                        selectedFormIndex === fIdx
-                          ? 'bg-sky-accent/20 border-sky-accent text-white shadow-md ring-1 ring-sky-accent/40'
-                          : 'bg-navy-900 border-surface-border hover:border-slate-500 text-slate-300'
-                      }`}
-                    >
-                      <div className="space-y-1 overflow-hidden flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs font-bold text-white truncate max-w-[200px]">
-                            {df.title || `Form #${fIdx + 1}`}
-                          </span>
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface border border-surface-border text-sky-accent font-medium">
-                            {df.detectedPlugin}
-                          </span>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-72 overflow-y-auto pr-1">
+                  {detectedFormsList.map((df, fIdx) => {
+                    const isChecked = !!checkedDiscoveredIndices[fIdx];
+                    return (
+                      <div
+                        key={df.id || fIdx}
+                        onClick={() => toggleDiscoveredCheck(fIdx)}
+                        className={`p-3 rounded-lg border text-left cursor-pointer transition-all flex items-start gap-2.5 ${
+                          isChecked
+                            ? 'bg-sky-accent/15 border-sky-accent text-white shadow-sm'
+                            : 'bg-navy-900/60 border-surface-border text-slate-400 opacity-75 hover:opacity-100'
+                        }`}
+                      >
+                        <div className="pt-0.5 shrink-0">
+                          {isChecked ? (
+                            <CheckSquare className="w-4 h-4 text-sky-accent" />
+                          ) : (
+                            <Square className="w-4 h-4 text-slate-500" />
+                          )}
                         </div>
 
-                        {df.pageTitle && (
-                          <div className="flex items-center gap-1 text-[11px] text-teal-light font-medium truncate">
-                            <span>📄 Page: {df.pageTitle}</span>
+                        <div className="space-y-0.5 overflow-hidden flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-xs font-bold text-white truncate max-w-[200px]">
+                              {df.title || `Form #${fIdx + 1}`}
+                            </span>
+                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-surface border border-surface-border text-sky-accent font-medium">
+                              {df.detectedPlugin}
+                            </span>
                           </div>
-                        )}
 
-                        {df.pageUrl && (
-                          <div className="text-[10px] text-slate-400 truncate max-w-[280px]">
-                            🔗 {df.pageUrl}
+                          {df.pageTitle && (
+                            <div className="text-[11px] text-teal-light font-medium truncate">
+                              📄 {df.pageTitle}
+                            </div>
+                          )}
+
+                          {df.pageUrl && (
+                            <div className="text-[10px] text-slate-400 truncate max-w-[280px]">
+                              🔗 {df.pageUrl}
+                            </div>
+                          )}
+
+                          <div className="text-[10px] text-slate-300 pt-0.5">
+                            <strong>{df.fields?.length || 0} inputs:</strong>{' '}
+                            {df.fields?.map((f: any) => f.label).filter(Boolean).slice(0, 4).join(', ')}
+                            {df.fields?.length > 4 ? '...' : ''}
                           </div>
-                        )}
-
-                        <div className="text-[11px] text-slate-300 pt-1 flex items-center gap-1.5">
-                          <span className="font-semibold text-white">{df.fields?.length || 0} inputs:</span>
-                          <span className="text-slate-400 truncate max-w-[220px]">
-                            {df.fields?.map((f: any) => f.label).filter(Boolean).join(', ')}
-                          </span>
                         </div>
                       </div>
-
-                      {selectedFormIndex === fIdx ? (
-                        <div className="shrink-0 flex items-center gap-1 bg-sky-accent text-white text-[10px] font-bold px-2 py-0.5 rounded shadow">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Selected
-                        </div>
-                      ) : (
-                        <span className="shrink-0 text-[10px] text-slate-400 border border-surface-border px-2 py-0.5 rounded hover:border-slate-400">
-                          Select
-                        </span>
-                      )}
-                    </button>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
           </div>
-
-          <div className="md:col-span-2 flex items-center gap-2 pt-1">
-            <input
-              type="checkbox"
-              id="isActive"
-              checked={isActive}
-              onChange={(e) => setIsActive(e.target.checked)}
-              className="w-4 h-4 rounded border-surface-border text-sky-accent focus:ring-0 bg-navy-800 cursor-pointer"
-            />
-            <label htmlFor="isActive" className="text-xs text-slate-300 cursor-pointer select-none">
-              Active Daily Form Monitoring (include this site in daily cron runs)
-            </label>
-          </div>
         </div>
       </div>
 
-      {/* SECTION 2: Dynamic Form Field Builder */}
-      <div className="bg-surface border border-surface-border rounded-xl p-6 space-y-4">
-        <div className="flex items-center justify-between">
+      {/* SECTION 2: Monitored Forms Manager (Hierarchical Multi-Form) */}
+      <div className="bg-surface border border-surface-border rounded-xl p-6 space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-              <Settings className="w-5 h-5 text-teal-light" /> Form Fields Configuration
+              <Layers className="w-5 h-5 text-teal-light" /> Monitored Forms on this Website ({forms.length})
             </h2>
             <p className="text-xs text-slate-400 mt-1">
-              Add inputs for Playwright to locate, fill, or toggle on the page.
+              All active forms below will be filled and tested during daily monitoring or when you click &quot;Test Now&quot;.
             </p>
           </div>
           <button
             type="button"
-            onClick={handleAddField}
+            onClick={handleAddNewForm}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-navy-800 text-sky-accent border border-surface-border hover:bg-surface-hover transition-colors"
           >
-            <Plus className="w-3.5 h-3.5" /> Add Field
+            <Plus className="w-3.5 h-3.5" /> Add Another Form to Website
           </button>
         </div>
 
-        <div className="space-y-3">
-          {fields.map((field, idx) => (
-            <div
-              key={idx}
-              className="p-3.5 rounded-lg bg-navy-800 border border-surface-border grid grid-cols-1 sm:grid-cols-12 gap-3 items-center"
-            >
-              <div className="sm:col-span-3">
-                <label className="text-[10px] uppercase font-semibold text-slate-400 block mb-1">
-                  Label
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Name"
-                  value={field.label}
-                  onChange={(e) => handleUpdateField(idx, 'label', e.target.value)}
-                  className="w-full bg-surface border border-surface-border rounded px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-sky-accent"
-                />
-              </div>
+        {/* Tab Strip to switch between forms */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 border-b border-surface-border">
+          {forms.map((formItem, idx) => {
+            const isActiveTab = activeFormIndex === idx;
+            return (
+              <div
+                key={formItem.id || idx}
+                onClick={() => setActiveFormIndex(idx)}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-t-lg border-t border-x cursor-pointer text-xs font-semibold transition-all shrink-0 ${
+                  isActiveTab
+                    ? 'bg-navy-900 border-sky-accent text-white shadow-sm'
+                    : 'bg-navy-800/60 border-surface-border text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span className="flex items-center gap-1.5">
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      formItem.isActive ? 'bg-emerald-400' : 'bg-slate-500'
+                    }`}
+                  />
+                  {formItem.name || `Form #${idx + 1}`}
+                </span>
 
-              <div className="sm:col-span-4">
-                <label className="text-[10px] uppercase font-semibold text-slate-400 block mb-1">
-                  CSS Selector
-                </label>
-                <input
-                  type="text"
-                  placeholder='input[name="form_fields[name]"]'
-                  value={field.selector}
-                  onChange={(e) => handleUpdateField(idx, 'selector', e.target.value)}
-                  className="w-full bg-surface border border-surface-border rounded px-2.5 py-1.5 text-xs font-mono text-slate-100 focus:outline-none focus:border-sky-accent"
-                />
-              </div>
+                <span className="text-[10px] px-1 py-0.2 rounded bg-surface border border-surface-border text-slate-400">
+                  {formItem.fields?.length || 0} inputs
+                </span>
 
-              <div className="sm:col-span-2">
-                <label className="text-[10px] uppercase font-semibold text-slate-400 block mb-1">
-                  Type
-                </label>
-                <select
-                  value={field.type}
-                  onChange={(e) => handleUpdateField(idx, 'type', e.target.value)}
-                  className="w-full bg-surface border border-surface-border rounded px-2 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-sky-accent"
-                >
-                  <option value="text">Text</option>
-                  <option value="email">Email</option>
-                  <option value="tel">Tel</option>
-                  <option value="textarea">Textarea</option>
-                  <option value="select">Select</option>
-                  <option value="checkbox">Checkbox</option>
-                </select>
+                {forms.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteForm(idx);
+                    }}
+                    className="p-1 hover:text-red-400 rounded transition-colors ml-1"
+                    title="Remove this form from website"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                )}
               </div>
+            );
+          })}
+        </div>
 
-              <div className="sm:col-span-2">
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-[10px] uppercase font-semibold text-slate-400 block">
-                    Test Value
-                  </label>
-                  {field.type === 'select' && (
-                    <button
-                      type="button"
-                      onClick={() => handleUpdateField(idx, 'testValue', '[Random Option]')}
-                      className="text-[9px] text-sky-accent hover:underline font-semibold"
-                      title="Set to dynamically pick a random live option from the dropdown"
-                    >
-                      Random
-                    </button>
-                  )}
+        {/* Active Form Settings Panel */}
+        <div className="bg-navy-900 border border-surface-border rounded-xl p-5 space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-surface-border pb-3">
+            <span className="text-xs font-bold text-sky-accent uppercase tracking-wider flex items-center gap-1.5">
+              <Settings className="w-3.5 h-3.5" /> Editing Settings for: &quot;{activeForm.name}&quot;
+            </span>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="activeFormToggle"
+                checked={activeForm.isActive !== false}
+                onChange={(e) => updateActiveForm('isActive', e.target.checked)}
+                className="w-4 h-4 rounded border-surface-border text-sky-accent focus:ring-0 bg-navy-800 cursor-pointer"
+              />
+              <label htmlFor="activeFormToggle" className="text-xs text-slate-300 cursor-pointer select-none">
+                Enable daily testing for this form
+              </label>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">
+                Form Name / Label <span className="text-red-400">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="e.g. Contact Us Form"
+                value={activeForm.name}
+                onChange={(e) => updateActiveForm('name', e.target.value)}
+                className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-sky-accent transition-colors"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">
+                Form Plugin Type
+              </label>
+              <select
+                value={activeForm.formPluginType}
+                onChange={(e) => updateActiveForm('formPluginType', e.target.value)}
+                className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-sky-accent transition-colors"
+              >
+                <option value="Elementor Pro">Elementor Pro</option>
+                <option value="Contact Form 7">Contact Form 7</option>
+                <option value="MetForm">MetForm</option>
+                <option value="WPForms">WPForms</option>
+                <option value="Gravity Forms">Gravity Forms</option>
+                <option value="Custom">Custom / Other</option>
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">
+                Exact Page URL where Form Lives <span className="text-red-400">*</span>
+              </label>
+              <input
+                type="url"
+                required
+                placeholder="https://example.com/contact-us"
+                value={activeForm.pageUrl}
+                onChange={(e) => updateActiveForm('pageUrl', e.target.value)}
+                className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-sky-accent transition-colors"
+              />
+            </div>
+          </div>
+
+          {/* Quick Preset loader for this specific form */}
+          <div className="pt-1 flex items-center gap-2 flex-wrap text-xs text-slate-400">
+            <span>Apply Preset to this form:</span>
+            {Object.keys(FORM_PRESETS).map((pKey) => (
+              <button
+                key={pKey}
+                type="button"
+                onClick={() => handleApplyPresetToActiveForm(pKey)}
+                className="px-2 py-0.5 rounded bg-navy-800 border border-surface-border hover:border-sky-accent text-slate-300 text-[11px] transition-colors"
+              >
+                {pKey}
+              </button>
+            ))}
+          </div>
+
+          {/* Form Fields Builder for Active Form */}
+          <div className="pt-2 space-y-3">
+            <div className="flex items-center justify-between border-t border-surface-border pt-4">
+              <div>
+                <h3 className="text-sm font-semibold text-white">Form Inputs & Test Values</h3>
+                <p className="text-[11px] text-slate-400">
+                  Inputs that Playwright will automatically fill or select for this form.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleAddFieldToActiveForm}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium bg-navy-800 text-sky-accent border border-surface-border hover:bg-surface-hover transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add Input Field
+              </button>
+            </div>
+
+            <div className="space-y-2.5">
+              {activeForm.fields && activeForm.fields.length > 0 ? (
+                activeForm.fields.map((field, fIdx) => (
+                  <div
+                    key={fIdx}
+                    className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 bg-navy-800/80 border border-surface-border p-3 rounded-lg items-center"
+                  >
+                    <div className="sm:col-span-3">
+                      <label className="text-[10px] text-slate-400 block mb-0.5 uppercase tracking-wider font-semibold">
+                        Label
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Your Name"
+                        value={field.label}
+                        onChange={(e) => handleUpdateActiveFormField(fIdx, 'label', e.target.value)}
+                        className="w-full bg-navy-900 border border-surface-border rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-sky-accent"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-4">
+                      <label className="text-[10px] text-slate-400 block mb-0.5 uppercase tracking-wider font-semibold">
+                        CSS Selector
+                      </label>
+                      <input
+                        type="text"
+                        placeholder='input[name="your-name"]'
+                        value={field.selector}
+                        onChange={(e) => handleUpdateActiveFormField(fIdx, 'selector', e.target.value)}
+                        className="w-full bg-navy-900 border border-surface-border rounded px-2.5 py-1.5 text-xs font-mono text-sky-accent focus:outline-none focus:border-sky-accent"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <label className="text-[10px] text-slate-400 block mb-0.5 uppercase tracking-wider font-semibold">
+                        Type
+                      </label>
+                      <select
+                        value={field.type}
+                        onChange={(e) => handleUpdateActiveFormField(fIdx, 'type', e.target.value)}
+                        className="w-full bg-navy-900 border border-surface-border rounded px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-sky-accent"
+                      >
+                        <option value="text">Text</option>
+                        <option value="email">Email</option>
+                        <option value="tel">Tel</option>
+                        <option value="textarea">Textarea</option>
+                        <option value="select">Select</option>
+                        <option value="checkbox">Checkbox</option>
+                      </select>
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <label className="text-[10px] text-slate-400 block mb-0.5 uppercase tracking-wider font-semibold">
+                        Test Value
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Value to fill"
+                        value={field.testValue}
+                        onChange={(e) => handleUpdateActiveFormField(fIdx, 'testValue', e.target.value)}
+                        className="w-full bg-navy-900 border border-surface-border rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-sky-accent"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-1 flex justify-end pt-3 sm:pt-0">
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveActiveFormField(fIdx)}
+                        className="p-1.5 text-slate-400 hover:text-red-400 rounded hover:bg-navy-900 transition-colors"
+                        title="Remove field"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-6 border border-dashed border-surface-border rounded-lg text-slate-500 text-xs">
+                  No input fields configured yet. Click &quot;Add Input Field&quot; or choose a preset above.
                 </div>
-                <input
-                  type="text"
-                  placeholder={field.type === 'select' ? '[Random Option]' : 'Test string'}
-                  value={field.testValue}
-                  onChange={(e) => handleUpdateField(idx, 'testValue', e.target.value)}
-                  className="w-full bg-surface border border-surface-border rounded px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-sky-accent"
-                />
-              </div>
-
-              <div className="sm:col-span-1 flex justify-end sm:pt-4">
-                <button
-                  type="button"
-                  onClick={() => handleRemoveField(idx)}
-                  className="text-slate-500 hover:text-red-400 p-1.5 rounded transition-colors"
-                  title="Remove field"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
+              )}
             </div>
-          ))}
-
-          {fields.some((f) => f.type === 'select') && (
-            <div className="p-3 bg-navy-900/60 rounded-lg border border-surface-border text-xs text-slate-300 flex items-center gap-2">
-              <span className="text-sky-accent font-semibold shrink-0">💡 Dropdown Tip:</span>
-              <span>
-                For <strong>Select</strong> inputs, keeping Test Value as <code className="text-amber-300 font-mono">[Random Option]</code> tells Playwright to automatically pick an available option randomly from the live website dropdown on every test run!
-              </span>
-            </div>
-          )}
-
-          {fields.length === 0 && (
-            <div className="p-6 text-center text-xs text-slate-400 bg-navy-800 rounded-lg border border-surface-border">
-              No fields configured yet. Click &quot;Add Field&quot; or choose a preset above.
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* SECTION 3: Submit Button & Verification Method */}
-      <div className="bg-surface border border-surface-border rounded-xl p-6 space-y-6">
-        <div>
-          <h2 className="text-lg font-semibold text-white">Submission & Success Verification</h2>
-          <p className="text-xs text-slate-400 mt-1">
-            Specify how Playwright should submit the form and confirm success.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-300">
-              Submit Button Selector <span className="text-red-400">*</span>
-            </label>
-            <input
-              type="text"
-              required
-              placeholder='button[type="submit"], input[type="submit"]'
-              value={submitButtonSelector}
-              onChange={(e) => setSubmitButtonSelector(e.target.value)}
-              className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-sm font-mono text-slate-100 focus:outline-none focus:border-sky-accent"
-            />
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-300">
-              Verification Method
-            </label>
-            <select
-              value={verificationMethod}
-              onChange={(e) => setVerificationMethod(e.target.value as any)}
-              className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-sky-accent"
-            >
-              <option value="text_visible">Text is Visible on Page (e.g. &quot;Thank you&quot;)</option>
-              <option value="selector_visible">CSS Selector Appears (e.g. &quot;.elementor-message-success&quot;)</option>
-              <option value="url_redirect">URL Redirects to (e.g. &quot;/thank-you&quot;)</option>
-            </select>
-          </div>
+          {/* Submission & Verification for Active Form */}
+          <div className="border-t border-surface-border pt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">
+                Submit Button Selector <span className="text-red-400">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                placeholder='button[type="submit"]'
+                value={activeForm.submitButtonSelector}
+                onChange={(e) => updateActiveForm('submitButtonSelector', e.target.value)}
+                className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-xs font-mono text-slate-100 focus:outline-none focus:border-sky-accent transition-colors"
+              />
+            </div>
 
-          <div className="md:col-span-2 space-y-1.5">
-            <label className="text-xs font-medium text-slate-300">
-              Expected Success Value <span className="text-red-400">*</span>
-            </label>
-            <input
-              type="text"
-              required
-              placeholder={
-                verificationMethod === 'selector_visible'
-                  ? '.elementor-message-success, .wpcf7-mail-sent-ok'
-                  : verificationMethod === 'url_redirect'
-                  ? '/thank-you'
-                  : 'Thank you for your message'
-              }
-              value={expectedSuccessValue}
-              onChange={(e) => setExpectedSuccessValue(e.target.value)}
-              className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-sky-accent"
-            />
-            <p className="text-[11px] text-slate-400">
-              Playwright waits up to 15 seconds after submission for this condition to be verified.
-            </p>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">
+                Verification Method
+              </label>
+              <select
+                value={activeForm.verificationMethod}
+                onChange={(e) => updateActiveForm('verificationMethod', e.target.value)}
+                className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-sky-accent transition-colors"
+              >
+                <option value="text_visible">Text Appears on Page</option>
+                <option value="selector_visible">CSS Selector Appears (e.g. .success-msg)</option>
+                <option value="url_redirect">URL Redirects to (Thank You Page)</option>
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300">
+                Expected Success Value <span className="text-red-400">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="Thank you for your message"
+                value={activeForm.expectedSuccessValue}
+                onChange={(e) => updateActiveForm('expectedSuccessValue', e.target.value)}
+                className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-sky-accent transition-colors"
+              />
+            </div>
           </div>
         </div>
       </div>
 
-      {/* SECTION 4: Per-Site Notification Routing */}
+      {/* SECTION 3: Notification Preferences */}
       <div className="bg-surface border border-surface-border rounded-xl p-6 space-y-6">
         <div>
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-            <Bell className="w-5 h-5 text-sky-accent" /> Notification & Alert Routing
+            <Bell className="w-5 h-5 text-sky-accent" /> Alert & Notification Routing
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Choose whether to route alerts to global agency defaults or site-specific client channels.
+            Choose where failure alerts (and screenshots) are sent if any form on this website breaks.
           </p>
         </div>
 
-        {/* Global vs Custom Toggle */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <label
-            className={`p-4 rounded-lg border cursor-pointer transition-all flex items-start gap-3 ${
-              useGlobalDefaults
-                ? 'bg-sky-accent/10 border-sky-accent'
-                : 'bg-navy-800 border-surface-border text-slate-300'
-            }`}
-          >
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
             <input
-              type="radio"
-              name="routingMode"
+              type="checkbox"
+              id="useGlobalDefaults"
               checked={useGlobalDefaults}
-              onChange={() => setUseGlobalDefaults(true)}
-              className="mt-1 text-sky-accent focus:ring-0"
+              onChange={(e) => setUseGlobalDefaults(e.target.checked)}
+              className="w-4 h-4 rounded border-surface-border text-sky-accent focus:ring-0 bg-navy-800 cursor-pointer"
             />
-            <div>
-              <span className="text-sm font-semibold text-white block">Use Global Agency Defaults</span>
-              <span className="text-xs text-slate-400 mt-0.5 block">
-                Dispatches to the email addresses and Slack webhook configured under Global Settings.
-              </span>
-            </div>
-          </label>
-
-          <label
-            className={`p-4 rounded-lg border cursor-pointer transition-all flex items-start gap-3 ${
-              !useGlobalDefaults
-                ? 'bg-sky-accent/10 border-sky-accent'
-                : 'bg-navy-800 border-surface-border text-slate-300'
-            }`}
-          >
-            <input
-              type="radio"
-              name="routingMode"
-              checked={!useGlobalDefaults}
-              onChange={() => setUseGlobalDefaults(false)}
-              className="mt-1 text-sky-accent focus:ring-0"
-            />
-            <div>
-              <span className="text-sm font-semibold text-white block">Custom Site Channels</span>
-              <span className="text-xs text-slate-400 mt-0.5 block">
-                Route failures directly to this client&apos;s designated team email and specific Slack channel.
-              </span>
-            </div>
-          </label>
-        </div>
-
-        {/* Channel Toggles */}
-        <div className="flex flex-wrap gap-6 pt-2">
-          <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-200">
-            <input
-              type="checkbox"
-              checked={enableEmail}
-              onChange={(e) => setEnableEmail(e.target.checked)}
-              className="w-4 h-4 rounded border-surface-border text-sky-accent focus:ring-0 bg-navy-800"
-            />
-            <Mail className="w-4 h-4 text-sky-accent" /> Enable Email Alerts
-          </label>
-
-          <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-200">
-            <input
-              type="checkbox"
-              checked={enableSlack}
-              onChange={(e) => setEnableSlack(e.target.checked)}
-              className="w-4 h-4 rounded border-surface-border text-sky-accent focus:ring-0 bg-navy-800"
-            />
-            <MessageSquare className="w-4 h-4 text-amber-400" /> Enable Slack Alerts
-          </label>
-
-          <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-200">
-            <input
-              type="checkbox"
-              checked={notifyOnSuccess}
-              onChange={(e) => setNotifyOnSuccess(e.target.checked)}
-              className="w-4 h-4 rounded border-surface-border text-sky-accent focus:ring-0 bg-navy-800"
-            />
-            Notify on Success as well (Default: only alert on failure)
-          </label>
-        </div>
-
-        {/* Custom Channels Inputs */}
-        {!useGlobalDefaults && (
-          <div className="space-y-4 pt-2 border-t border-surface-border">
-            {enableEmail && (
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-300">
-                  Custom Recipient Email Addresses (comma-separated)
-                </label>
-                <input
-                  type="text"
-                  placeholder="client@company.com, tech@company.com"
-                  value={customEmails}
-                  onChange={(e) => setCustomEmails(e.target.value)}
-                  className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-accent"
-                />
-              </div>
-            )}
-
-            {enableSlack && (
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-300">
-                  Custom Slack Incoming Webhook URL for this Site
-                </label>
-                <input
-                  type="url"
-                  placeholder="https://hooks.slack.com/services/..."
-                  value={customSlackWebhookUrl}
-                  onChange={(e) => setCustomSlackWebhookUrl(e.target.value)}
-                  className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-accent"
-                />
-              </div>
-            )}
+            <label htmlFor="useGlobalDefaults" className="text-sm font-medium text-slate-200 cursor-pointer select-none">
+              Use Global Notification Defaults (Configured in Settings)
+            </label>
           </div>
-        )}
-      </div>
 
-      {/* Test Result Display if Live Tested */}
-      {testResult && (
-        <div
-          className={`p-4 rounded-xl border ${
-            testResult.status === 'passed'
-              ? 'bg-emerald-950/40 border-emerald-800 text-emerald-200'
-              : 'bg-red-950/40 border-red-800 text-red-200'
-          }`}
-        >
-          <div className="flex items-center gap-2 font-semibold text-sm">
-            {testResult.status === 'passed' ? (
-              <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-            ) : (
-              <AlertCircle className="w-5 h-5 text-red-400" />
-            )}
-            Live Test {testResult.status.toUpperCase()} ({testResult.durationMs}ms)
-          </div>
-          {testResult.errorMessage && (
-            <div className="mt-2 text-xs font-mono bg-navy-900/80 p-3 rounded border border-surface-border">
-              {testResult.errorMessage}
+          {!useGlobalDefaults && (
+            <div className="p-4 rounded-xl bg-navy-800/80 border border-surface-border space-y-4 animate-in fade-in duration-200">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="enableEmail"
+                      checked={enableEmail}
+                      onChange={(e) => setEnableEmail(e.target.checked)}
+                      className="w-4 h-4 rounded border-surface-border text-sky-accent focus:ring-0 bg-navy-900 cursor-pointer"
+                    />
+                    <label htmlFor="enableEmail" className="text-xs font-semibold text-slate-300 flex items-center gap-1.5 cursor-pointer">
+                      <Mail className="w-3.5 h-3.5 text-sky-accent" /> Enable Custom Email Alerts
+                    </label>
+                  </div>
+                  <input
+                    type="text"
+                    disabled={!enableEmail}
+                    placeholder="client-support@agency.com, alerts@site.com"
+                    value={customEmails}
+                    onChange={(e) => setCustomEmails(e.target.value)}
+                    className="w-full bg-navy-900 border border-surface-border rounded-lg px-3 py-2 text-xs text-slate-100 disabled:opacity-40 focus:outline-none focus:border-sky-accent"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="enableSlack"
+                      checked={enableSlack}
+                      onChange={(e) => setEnableSlack(e.target.checked)}
+                      className="w-4 h-4 rounded border-surface-border text-sky-accent focus:ring-0 bg-navy-900 cursor-pointer"
+                    />
+                    <label htmlFor="enableSlack" className="text-xs font-semibold text-slate-300 flex items-center gap-1.5 cursor-pointer">
+                      <MessageSquare className="w-3.5 h-3.5 text-amber-400" /> Enable Custom Slack Webhook
+                    </label>
+                  </div>
+                  <input
+                    type="url"
+                    disabled={!enableSlack}
+                    placeholder="https://hooks.slack.com/services/..."
+                    value={customSlackWebhookUrl}
+                    onChange={(e) => setCustomSlackWebhookUrl(e.target.value)}
+                    className="w-full bg-navy-900 border border-surface-border rounded-lg px-3 py-2 text-xs text-slate-100 disabled:opacity-40 focus:outline-none focus:border-sky-accent"
+                  />
+                </div>
+              </div>
             </div>
           )}
-        </div>
-      )}
 
-      {/* Form Action Buttons */}
-      <div className="flex items-center justify-between pt-4">
+          <div className="flex items-center gap-2 pt-1">
+            <input
+              type="checkbox"
+              id="notifyOnSuccess"
+              checked={notifyOnSuccess}
+              onChange={(e) => setNotifyOnSuccess(e.target.checked)}
+              className="w-4 h-4 rounded border-surface-border text-sky-accent focus:ring-0 bg-navy-800 cursor-pointer"
+            />
+            <label htmlFor="notifyOnSuccess" className="text-xs text-slate-400 cursor-pointer select-none">
+              Notify on passed tests as well (Default: only alert on form failures)
+            </label>
+          </div>
+        </div>
+      </div>
+
+      {/* ACTION BAR: Save & Immediate Test */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-surface-border">
         {isEditing && (
           <button
             type="button"
             onClick={handleTestNow}
             disabled={isTesting || isSaving}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-semibold text-sky-accent bg-sky-accent/10 hover:bg-sky-accent/20 border border-sky-accent/30 transition-all disabled:opacity-50"
+            className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold bg-navy-800 hover:bg-surface-hover text-sky-accent border border-sky-accent/30 shadow transition-all disabled:opacity-50"
           >
             {isTesting ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" /> Testing with Playwright...
+                <Loader2 className="w-4 h-4 animate-spin text-sky-accent" /> Testing All Forms...
               </>
             ) : (
               <>
-                <Play className="w-4 h-4 fill-current" /> Run Live Test Now
+                <Play className="w-4 h-4 fill-sky-accent text-sky-accent" /> Test All {forms.length} Forms Now
               </>
             )}
           </button>
         )}
 
-        <div className="flex items-center gap-3 ml-auto">
+        <div className="flex items-center gap-3 w-full sm:w-auto justify-end ml-auto">
           <button
             type="button"
             onClick={() => router.push('/')}
-            disabled={isSaving || isTesting}
-            className="px-5 py-2.5 rounded-lg text-sm font-medium text-slate-300 hover:text-white hover:bg-surface border border-surface-border transition-colors disabled:opacity-50"
+            className="px-4 py-2.5 rounded-lg text-xs font-medium text-slate-400 hover:text-white border border-surface-border bg-navy-800 hover:bg-surface-hover transition-colors"
           >
             Cancel
           </button>
@@ -903,21 +1079,72 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
           <button
             type="submit"
             disabled={isSaving || isTesting}
-            className="flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold text-navy-900 bg-gradient-to-r from-sky-accent to-teal-light hover:brightness-110 transition-all shadow-md shadow-sky-accent/20 disabled:opacity-50"
+            className="flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg text-xs font-bold text-navy-900 bg-gradient-to-r from-sky-accent to-teal-light hover:brightness-110 shadow-lg shadow-sky-accent/20 transition-all disabled:opacity-50"
           >
             {isSaving ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" /> Saving Site...
+                <Loader2 className="w-4 h-4 animate-spin" /> Saving Website...
               </>
             ) : (
               <>
-                <Save className="w-4 h-4" /> {isEditing ? 'Update Website' : 'Save Website'}
+                <Save className="w-4 h-4 stroke-[2.5]" /> Save Website & All {forms.length} Forms
               </>
             )}
           </button>
         </div>
       </div>
+
+      {/* Live Inline Test Result Modal / Banner if tested */}
+      {testResult && (
+        <div
+          className={`p-5 rounded-xl border space-y-3 ${
+            testResult.status === 'passed'
+              ? 'bg-emerald-950/40 border-emerald-800 text-emerald-100'
+              : 'bg-red-950/40 border-red-800 text-red-100'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="font-bold text-sm flex items-center gap-2">
+              {testResult.status === 'passed' ? (
+                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+              ) : (
+                <AlertCircle className="w-5 h-5 text-red-400" />
+              )}
+              Live Multi-Form Test Result: {testResult.status.toUpperCase()} ({testResult.durationMs}ms)
+            </span>
+            <span className="text-xs opacity-75">
+              {testResult.formResults?.filter((fr: any) => fr.status === 'passed').length}/
+              {testResult.formResults?.length || 1} forms passed
+            </span>
+          </div>
+
+          {testResult.formResults && testResult.formResults.length > 0 && (
+            <div className="space-y-1.5 pt-2">
+              {testResult.formResults.map((fr: any, idx: number) => (
+                <div
+                  key={idx}
+                  className="flex items-center justify-between p-2 rounded bg-navy-900/60 border border-surface-border text-xs"
+                >
+                  <span className="font-medium text-white">{fr.formName}</span>
+                  <span
+                    className={`font-bold text-[10px] px-2 py-0.5 rounded ${
+                      fr.status === 'passed'
+                        ? 'bg-emerald-500/20 text-emerald-400'
+                        : 'bg-red-500/20 text-red-400'
+                    }`}
+                  >
+                    {fr.status.toUpperCase()} ({fr.durationMs}ms)
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {testResult.errorMessage && (
+            <p className="text-xs font-mono text-red-300 pt-1">{testResult.errorMessage}</p>
+          )}
+        </div>
+      )}
     </form>
   );
 }
-

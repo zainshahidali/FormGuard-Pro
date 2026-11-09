@@ -1,5 +1,6 @@
 import { chromium, Browser, Page } from 'playwright';
 import { ISite } from '@/models/Site';
+import { IFormTestResult } from '@/models/TestLog';
 
 export interface TestResult {
   status: 'passed' | 'failed';
@@ -7,6 +8,16 @@ export interface TestResult {
   errorMessage?: string;
   consoleErrors: string[];
   screenshotBase64?: string;
+  formResults?: IFormTestResult[];
+}
+
+export interface SiteTestResult {
+  status: 'passed' | 'failed';
+  durationMs: number;
+  errorMessage?: string;
+  consoleErrors: string[];
+  screenshotBase64?: string;
+  formResults: IFormTestResult[];
 }
 
 export async function runFormTest(site: ISite | any): Promise<TestResult> {
@@ -296,5 +307,86 @@ export async function runFormTest(site: ISite | any): Promise<TestResult> {
       }
     }
   }
+}
+
+export async function runSiteTest(site: ISite | any): Promise<SiteTestResult> {
+  const startTime = Date.now();
+  const formResults: IFormTestResult[] = [];
+  const allConsoleErrors: string[] = [];
+
+  // Determine forms to test
+  let formsToTest: any[] = [];
+  if (site.forms && Array.isArray(site.forms) && site.forms.length > 0) {
+    formsToTest = site.forms.filter((f: any) => f.isActive !== false);
+  }
+
+  // Fallback for single-form sites or if no active sub-forms
+  if (formsToTest.length === 0) {
+    formsToTest = [
+      {
+        id: site._id?.toString() || 'default-form',
+        name: site.name || 'Primary Form',
+        pageUrl: site.url,
+        formPluginType: site.formPluginType || 'Custom',
+        fields: site.fields || [],
+        submitButtonSelector: site.submitButtonSelector,
+        verificationMethod: site.verificationMethod,
+        expectedSuccessValue: site.expectedSuccessValue,
+        isActive: site.isActive !== false,
+      },
+    ];
+  }
+
+  let overallStatus: 'passed' | 'failed' = 'passed';
+  let primaryErrorMessage = '';
+  let primaryScreenshotBase64 = '';
+
+  for (const form of formsToTest) {
+    // Construct single form test payload
+    const formPayload = {
+      url: form.pageUrl || site.url,
+      fields: form.fields,
+      submitButtonSelector: form.submitButtonSelector,
+      verificationMethod: form.verificationMethod,
+      expectedSuccessValue: form.expectedSuccessValue,
+      name: `${site.name} — ${form.name || 'Form'}`,
+    };
+
+    const res = await runFormTest(formPayload);
+
+    formResults.push({
+      formId: form.id || form._id?.toString(),
+      formName: form.name || 'Form',
+      pageUrl: form.pageUrl || site.url,
+      status: res.status,
+      durationMs: res.durationMs,
+      errorMessage: res.errorMessage || '',
+      consoleErrors: res.consoleErrors || [],
+      screenshotBase64: res.screenshotBase64 || '',
+    });
+
+    if (res.consoleErrors && res.consoleErrors.length > 0) {
+      allConsoleErrors.push(...res.consoleErrors);
+    }
+
+    if (res.status === 'failed') {
+      overallStatus = 'failed';
+      if (!primaryErrorMessage) {
+        primaryErrorMessage = `Form "${form.name || 'Form'}" failed: ${res.errorMessage}`;
+        primaryScreenshotBase64 = res.screenshotBase64 || '';
+      }
+    }
+  }
+
+  const totalDurationMs = Date.now() - startTime;
+
+  return {
+    status: overallStatus,
+    durationMs: totalDurationMs,
+    errorMessage: primaryErrorMessage,
+    consoleErrors: Array.from(new Set(allConsoleErrors)).slice(-15),
+    screenshotBase64: primaryScreenshotBase64,
+    formResults,
+  };
 }
 

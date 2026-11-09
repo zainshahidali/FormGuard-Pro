@@ -348,14 +348,14 @@ export default function DashboardPage() {
                       key={site._id}
                       className="hover:bg-navy-800/60 transition-colors group"
                     >
-                      {/* Name & URL */}
+                      {/* Name & URL & Monitored Forms */}
                       <td className="py-4 px-5">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-semibold text-slate-100 text-sm">
                             {site.name}
                           </span>
-                          <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-surface border border-surface-border text-slate-300">
-                            {site.formPluginType || 'Elementor'}
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-accent/15 text-sky-accent border border-sky-accent/30">
+                            {site.forms && site.forms.length > 0 ? `${site.forms.length} Forms Monitored` : '1 Form Monitored'}
                           </span>
                         </div>
                         <a
@@ -366,6 +366,39 @@ export default function DashboardPage() {
                         >
                           {site.url} <ExternalLink className="w-3 h-3 shrink-0" />
                         </a>
+
+                        {site.forms && site.forms.length > 0 && (
+                          <div className="flex items-center gap-1.5 flex-wrap pt-1.5">
+                            {site.forms.slice(0, 3).map((f: any, fIdx: number) => (
+                              <span
+                                key={fIdx}
+                                className={`text-[10px] px-2 py-0.5 rounded border flex items-center gap-1 ${
+                                  f.lastStatus === 'healthy'
+                                    ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-300'
+                                    : f.lastStatus === 'failing'
+                                    ? 'bg-red-950/40 border-red-800/60 text-red-300'
+                                    : 'bg-navy-900 border-surface-border text-slate-400'
+                                }`}
+                              >
+                                <span
+                                  className={`w-1.5 h-1.5 rounded-full ${
+                                    f.lastStatus === 'healthy'
+                                      ? 'bg-emerald-400'
+                                      : f.lastStatus === 'failing'
+                                      ? 'bg-red-400'
+                                      : 'bg-slate-400'
+                                  }`}
+                                />
+                                {f.name}
+                              </span>
+                            ))}
+                            {site.forms.length > 3 && (
+                              <span className="text-[10px] text-slate-400 font-medium">
+                                +{site.forms.length - 3} more
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
 
                       {/* Status Badge */}
@@ -373,7 +406,7 @@ export default function DashboardPage() {
                         {site.lastStatus === 'healthy' ? (
                           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                            Healthy
+                            Healthy (All Forms Passing)
                           </span>
                         ) : site.lastStatus === 'failing' ? (
                           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-red-500/15 text-red-400 border border-red-500/30">

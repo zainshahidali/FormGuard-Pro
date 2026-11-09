@@ -3,7 +3,7 @@ import { connectToDatabase } from '@/lib/mongodb';
 import Site from '@/models/Site';
 import Settings from '@/models/Settings';
 import TestLog from '@/models/TestLog';
-import { runFormTest } from '@/lib/tester';
+import { runSiteTest } from '@/lib/tester';
 import { dispatchAlerts } from '@/lib/notifier';
 
 export const dynamic = 'force-dynamic';
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
     for (const site of activeSites) {
       try {
         console.log(`[FormGuard Cron] Testing site: ${site.name} (${site.url})`);
-        const result = await runFormTest(site);
+        const result = await runSiteTest(site);
 
         if (result.status === 'passed') {
           passedCount++;
@@ -70,9 +70,25 @@ export async function POST(req: NextRequest) {
           errorMessage: result.errorMessage || '',
           consoleErrors: result.consoleErrors || [],
           screenshotBase64: result.screenshotBase64 || '',
+          formResults: result.formResults || [],
           notificationsSent: { email: false, slack: false },
           executedAt: new Date(),
         });
+
+        // Update individual sub-forms statuses if site has forms array
+        if (site.forms && site.forms.length > 0 && result.formResults) {
+          for (const formItem of site.forms) {
+            const matchingResult = result.formResults.find(
+              (fr) => (fr.formId && fr.formId === formItem.id) || fr.formName === formItem.name
+            );
+            if (matchingResult) {
+              formItem.lastStatus = matchingResult.status === 'passed' ? 'healthy' : 'failing';
+              formItem.lastCheckedAt = new Date();
+              formItem.lastErrorMessage = matchingResult.errorMessage || '';
+              formItem.lastScreenshotBase64 = matchingResult.screenshotBase64 || '';
+            }
+          }
+        }
 
         // Update site status
         site.lastStatus = result.status === 'passed' ? 'healthy' : 'failing';

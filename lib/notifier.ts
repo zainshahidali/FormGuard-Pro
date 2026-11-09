@@ -1,7 +1,7 @@
 import nodemailer from 'nodemailer';
 import { ISite } from '@/models/Site';
 import { ISettings } from '@/models/Settings';
-import { TestResult } from '@/lib/tester';
+import { TestResult, SiteTestResult } from '@/lib/tester';
 
 export interface NotificationResult {
   email: boolean;
@@ -25,7 +25,11 @@ export async function sendSlackWebhook(
   }
 }
 
-export function buildSlackBlocks(site: ISite | any, result: TestResult, appUrl: string = 'http://localhost:3000') {
+export function buildSlackBlocks(
+  site: ISite | any,
+  result: TestResult | SiteTestResult | any,
+  appUrl: string = 'http://localhost:3000'
+) {
   const isFailed = result.status === 'failed';
   const statusEmoji = isFailed ? '🚨' : '✅';
   const statusText = isFailed ? 'FORM SUBMISSION FAILED' : 'FORM SUBMISSION PASSED';
@@ -49,7 +53,7 @@ export function buildSlackBlocks(site: ISite | any, result: TestResult, appUrl: 
         },
         {
           type: 'mrkdwn',
-          text: `*Plugin Type:*\n${site.formPluginType || 'Elementor Pro'}`,
+          text: `*Total Forms Checked:*\n${result.formResults?.length || 1} form(s)`,
         },
         {
           type: 'mrkdwn',
@@ -57,11 +61,26 @@ export function buildSlackBlocks(site: ISite | any, result: TestResult, appUrl: 
         },
         {
           type: 'mrkdwn',
-          text: `*Response Duration:*\n${result.durationMs}ms`,
+          text: `*Total Duration:*\n${result.durationMs}ms`,
         },
       ],
     },
   ];
+
+  if (result.formResults && result.formResults.length > 0) {
+    const formSummaries = result.formResults.map((fr: any) => {
+      const icon = fr.status === 'passed' ? '✅' : '❌';
+      return `${icon} *${fr.formName}* (<${fr.pageUrl}|${fr.pageUrl}>): ${fr.status.toUpperCase()} (${fr.durationMs}ms)${fr.errorMessage ? `\n   ↳ _${fr.errorMessage}_` : ''}`;
+    }).join('\n');
+
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*Monitored Forms Breakdown:*\n${formSummaries}`,
+      },
+    });
+  }
 
   if (isFailed && result.errorMessage) {
     blocks.push({
@@ -109,7 +128,7 @@ export async function sendEmailNotification(
   smtpConfig: any,
   toEmails: string[],
   site: ISite | any,
-  result: TestResult,
+  result: TestResult | SiteTestResult | any,
   appUrl: string = 'http://localhost:3000'
 ): Promise<boolean> {
   if (!toEmails || toEmails.length === 0) return false;
@@ -188,8 +207,8 @@ export async function sendEmailNotification(
                 <td style="padding: 8px 0;"><a href="${site.url}" style="color: #0EA5E9; text-decoration: underline;">${site.url}</a></td>
               </tr>
               <tr>
-                <td style="padding: 8px 0; color: #94A3B8;"><strong>Form Plugin:</strong></td>
-                <td style="padding: 8px 0; color: #F8FAFC;">${site.formPluginType || 'Elementor Pro'}</td>
+                <td style="padding: 8px 0; color: #94A3B8;"><strong>Total Forms:</strong></td>
+                <td style="padding: 8px 0; color: #F8FAFC;">${result.formResults?.length || 1} form(s) monitored</td>
               </tr>
               <tr>
                 <td style="padding: 8px 0; color: #94A3B8;"><strong>Execution Time:</strong></td>
@@ -200,6 +219,37 @@ export async function sendEmailNotification(
                 <td style="padding: 8px 0; color: #F8FAFC;">${new Date().toUTCString()}</td>
               </tr>
             </table>
+
+            ${
+              result.formResults && result.formResults.length > 0
+                ? `
+              <div style="margin-top: 20px; background-color: #0F172A; border: 1px solid #1E293B; border-radius: 8px; padding: 14px;">
+                <h4 style="margin: 0 0 10px 0; font-size: 14px; color: #38BDF8;">Forms Verification Breakdown:</h4>
+                <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                  ${result.formResults
+                    .map(
+                      (fr: any) => `
+                    <tr style="border-bottom: 1px solid #1E293B;">
+                      <td style="padding: 8px 0; color: #F8FAFC;">
+                        <strong>${fr.formName}</strong><br/>
+                        <span style="font-size: 11px; color: #94A3B8;">${fr.pageUrl}</span>
+                      </td>
+                      <td style="padding: 8px 0; text-align: right;">
+                        <span style="padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; background-color: ${
+                          fr.status === 'passed' ? '#064E3B' : '#7F1D1D'
+                        }; color: ${fr.status === 'passed' ? '#34D399' : '#FCA5A5'};">
+                          ${fr.status.toUpperCase()}
+                        </span>
+                      </td>
+                    </tr>
+                  `
+                    )
+                    .join('')}
+                </table>
+              </div>
+            `
+                : ''
+            }
 
             ${
               isFailed
@@ -243,7 +293,7 @@ export async function sendEmailNotification(
 
 export async function dispatchAlerts(
   site: ISite | any,
-  testResult: TestResult,
+  testResult: TestResult | SiteTestResult | any,
   globalSettings?: ISettings | any
 ): Promise<NotificationResult> {
   const isFailed = testResult.status === 'failed';

@@ -7,6 +7,22 @@ export interface IFormField {
   testValue: string;
 }
 
+export interface IFormItem {
+  id: string;
+  name: string;
+  pageUrl: string;
+  formPluginType: 'Elementor Pro' | 'Contact Form 7' | 'MetForm' | 'WPForms' | 'Gravity Forms' | 'Custom';
+  fields: IFormField[];
+  submitButtonSelector: string;
+  verificationMethod: 'text_visible' | 'selector_visible' | 'url_redirect';
+  expectedSuccessValue: string;
+  isActive: boolean;
+  lastStatus?: 'healthy' | 'failing' | 'pending';
+  lastCheckedAt?: Date;
+  lastErrorMessage?: string;
+  lastScreenshotBase64?: string;
+}
+
 export interface INotificationPreferences {
   useGlobalDefaults: boolean;
   enableEmail: boolean;
@@ -19,11 +35,12 @@ export interface INotificationPreferences {
 export interface ISite extends Document {
   name: string;
   url: string;
-  formPluginType: 'Elementor Pro' | 'Contact Form 7' | 'MetForm' | 'WPForms' | 'Gravity Forms' | 'Custom';
-  fields: IFormField[];
-  submitButtonSelector: string;
-  verificationMethod: 'text_visible' | 'selector_visible' | 'url_redirect';
-  expectedSuccessValue: string;
+  formPluginType?: 'Elementor Pro' | 'Contact Form 7' | 'MetForm' | 'WPForms' | 'Gravity Forms' | 'Custom';
+  fields?: IFormField[];
+  submitButtonSelector?: string;
+  verificationMethod?: 'text_visible' | 'selector_visible' | 'url_redirect';
+  expectedSuccessValue?: string;
+  forms: IFormItem[];
   notificationPreferences: INotificationPreferences;
   isActive: boolean;
   lastStatus: 'healthy' | 'failing' | 'pending';
@@ -58,10 +75,11 @@ const NotificationPreferencesSchema = new Schema<INotificationPreferences>(
   { _id: false }
 );
 
-const SiteSchema = new Schema<ISite>(
+const FormItemSchema = new Schema<IFormItem>(
   {
+    id: { type: String, default: () => new mongoose.Types.ObjectId().toString() },
     name: { type: String, required: true, trim: true },
-    url: { type: String, required: true, trim: true },
+    pageUrl: { type: String, required: true, trim: true },
     formPluginType: {
       type: String,
       enum: ['Elementor Pro', 'Contact Form 7', 'MetForm', 'WPForms', 'Gravity Forms', 'Custom'],
@@ -84,6 +102,52 @@ const SiteSchema = new Schema<ISite>(
     expectedSuccessValue: {
       type: String,
       required: true,
+      default: 'Thank you',
+    },
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+    lastStatus: {
+      type: String,
+      enum: ['healthy', 'failing', 'pending'],
+      default: 'pending',
+    },
+    lastCheckedAt: { type: Date },
+    lastErrorMessage: { type: String, default: '' },
+    lastScreenshotBase64: { type: String, default: '' },
+  },
+  { _id: false }
+);
+
+const SiteSchema = new Schema<ISite>(
+  {
+    name: { type: String, required: true, trim: true },
+    url: { type: String, required: true, trim: true },
+    forms: {
+      type: [FormItemSchema],
+      default: [],
+    },
+    formPluginType: {
+      type: String,
+      enum: ['Elementor Pro', 'Contact Form 7', 'MetForm', 'WPForms', 'Gravity Forms', 'Custom'],
+      default: 'Elementor Pro',
+    },
+    fields: {
+      type: [FormFieldSchema],
+      default: [],
+    },
+    submitButtonSelector: {
+      type: String,
+      default: 'button[type="submit"]',
+    },
+    verificationMethod: {
+      type: String,
+      enum: ['text_visible', 'selector_visible', 'url_redirect'],
+      default: 'text_visible',
+    },
+    expectedSuccessValue: {
+      type: String,
       default: 'Thank you',
     },
     notificationPreferences: {

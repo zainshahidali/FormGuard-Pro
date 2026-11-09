@@ -3,7 +3,7 @@ import { connectToDatabase } from '@/lib/mongodb';
 import Site from '@/models/Site';
 import Settings from '@/models/Settings';
 import TestLog from '@/models/TestLog';
-import { runFormTest } from '@/lib/tester';
+import { runSiteTest } from '@/lib/tester';
 import { dispatchAlerts } from '@/lib/notifier';
 
 export const dynamic = 'force-dynamic';
@@ -31,10 +31,10 @@ export async function POST(req: NextRequest) {
 
     const settings = await Settings.findOne();
 
-    // Run Playwright form test
-    const testResult = await runFormTest(site);
+    // Run Playwright site test across all active forms
+    const testResult = await runSiteTest(site);
 
-    // Save test log
+    // Save test log with formResults breakdown
     const testLog = await TestLog.create({
       siteId: site._id,
       status: testResult.status,
@@ -42,11 +42,27 @@ export async function POST(req: NextRequest) {
       errorMessage: testResult.errorMessage || '',
       consoleErrors: testResult.consoleErrors || [],
       screenshotBase64: testResult.screenshotBase64 || '',
+      formResults: testResult.formResults || [],
       notificationsSent: { email: false, slack: false },
       executedAt: new Date(),
     });
 
-    // Update site status
+    // Update individual sub-forms statuses if site has forms array
+    if (site.forms && site.forms.length > 0 && testResult.formResults) {
+      for (const formItem of site.forms) {
+        const matchingResult = testResult.formResults.find(
+          (fr) => (fr.formId && fr.formId === formItem.id) || fr.formName === formItem.name
+        );
+        if (matchingResult) {
+          formItem.lastStatus = matchingResult.status === 'passed' ? 'healthy' : 'failing';
+          formItem.lastCheckedAt = new Date();
+          formItem.lastErrorMessage = matchingResult.errorMessage || '';
+          formItem.lastScreenshotBase64 = matchingResult.screenshotBase64 || '';
+        }
+      }
+    }
+
+    // Update overall site status
     site.lastStatus = testResult.status === 'passed' ? 'healthy' : 'failing';
     site.lastCheckedAt = new Date();
     await site.save();
@@ -68,6 +84,7 @@ export async function POST(req: NextRequest) {
         name: site.name,
         lastStatus: site.lastStatus,
         lastCheckedAt: site.lastCheckedAt,
+        forms: site.forms,
       },
     });
   } catch (error: any) {

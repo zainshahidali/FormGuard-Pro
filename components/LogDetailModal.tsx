@@ -125,6 +125,55 @@ export default function LogDetailModal({ log, onClose }: LogDetailModalProps) {
             </div>
           </div>
 
+          {/* Multi-Form Test Results Breakdown */}
+          {log.formResults && log.formResults.length > 0 && (
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase tracking-wider text-sky-accent flex items-center justify-between">
+                <span>Forms Tested on this Website ({log.formResults.length})</span>
+                <span className="text-[11px] text-slate-400 font-normal">
+                  {log.formResults.filter((f: any) => f.status === 'passed').length}/{log.formResults.length} passed
+                </span>
+              </label>
+              <div className="space-y-2">
+                {log.formResults.map((fr: any, idx: number) => {
+                  const frPassed = fr.status === 'passed';
+                  return (
+                    <div
+                      key={fr.formId || idx}
+                      className={`p-3 rounded-lg border text-xs flex flex-col gap-1.5 ${
+                        frPassed
+                          ? 'bg-emerald-950/20 border-emerald-900/50 text-emerald-200'
+                          : 'bg-red-950/30 border-red-900/60 text-red-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                              frPassed ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+                            }`}
+                          >
+                            {fr.status.toUpperCase()}
+                          </span>
+                          <span className="font-semibold text-white">{fr.formName}</span>
+                        </div>
+                        <span className="text-slate-400 font-mono text-[11px]">{fr.durationMs}ms</span>
+                      </div>
+                      <div className="text-[11px] text-slate-400 truncate">
+                        🔗 {fr.pageUrl}
+                      </div>
+                      {fr.errorMessage && (
+                        <div className="text-[11px] text-red-300 font-mono bg-red-950/60 p-2 rounded mt-1">
+                          {fr.errorMessage}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Failure Error Message */}
           {!isPassed && log.errorMessage && (
             <div className="space-y-2">

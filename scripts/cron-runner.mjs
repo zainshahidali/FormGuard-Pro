@@ -69,6 +69,7 @@ const SiteSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
     url: { type: String, required: true },
+    forms: [mongoose.Schema.Types.Mixed],
     formPluginType: { type: String, default: 'Elementor Pro' },
     fields: [FormFieldSchema],
     submitButtonSelector: { type: String, required: true },
@@ -440,35 +441,83 @@ async function main() {
 
     for (const site of activeSites) {
       console.log(`\n--> Testing [${site.name}] (${site.url})...`);
-      const result = await runFormTest(site);
 
-      if (result.status === 'passed') {
+      const formsToTest =
+        site.forms && site.forms.length > 0
+          ? site.forms.filter((f) => f.isActive !== false)
+          : [site];
+
+      console.log(`    Testing ${formsToTest.length} form(s) for ${site.name}...`);
+      let siteStatus = 'passed';
+      let siteError = '';
+      let siteScreenshot = '';
+      const allConsoleErrors = [];
+      let totalDuration = 0;
+      const formResults = [];
+
+      for (const formItem of formsToTest) {
+        const formPayload = {
+          url: formItem.pageUrl || site.url,
+          fields: formItem.fields || [],
+          submitButtonSelector: formItem.submitButtonSelector,
+          verificationMethod: formItem.verificationMethod,
+          expectedSuccessValue: formItem.expectedSuccessValue,
+          name: `${site.name} — ${formItem.name || 'Form'}`,
+        };
+
+        const formRes = await runFormTest(formPayload);
+        totalDuration += formRes.durationMs;
+        if (formRes.consoleErrors) allConsoleErrors.push(...formRes.consoleErrors);
+
+        formResults.push({
+          formName: formItem.name || 'Form',
+          pageUrl: formItem.pageUrl || site.url,
+          status: formRes.status,
+          durationMs: formRes.durationMs,
+          errorMessage: formRes.errorMessage || '',
+          screenshotBase64: formRes.screenshotBase64 || '',
+        });
+
+        if (formRes.status === 'failed') {
+          siteStatus = 'failed';
+          if (!siteError) {
+            siteError = `Form "${formItem.name}" failed: ${formRes.errorMessage}`;
+            siteScreenshot = formRes.screenshotBase64 || '';
+          }
+          console.log(`    ❌ [${formItem.name}] FAILED in ${formRes.durationMs}ms: ${formRes.errorMessage}`);
+        } else {
+          console.log(`    ✅ [${formItem.name}] PASSED in ${formRes.durationMs}ms`);
+        }
+      }
+
+      if (siteStatus === 'passed') {
         passedTotal++;
-        console.log(`    ✅ PASSED in ${result.durationMs}ms`);
+        console.log(`    ✅ SITE PASSED (All ${formsToTest.length} forms verified)`);
       } else {
         failedTotal++;
-        console.log(`    ❌ FAILED in ${result.durationMs}ms — ${result.errorMessage}`);
+        console.log(`    ❌ SITE FAILED (${siteError})`);
       }
 
       // Save log
       const log = await TestLog.create({
         siteId: site._id,
-        status: result.status,
-        durationMs: result.durationMs,
-        errorMessage: result.errorMessage || '',
-        consoleErrors: result.consoleErrors || [],
-        screenshotBase64: result.screenshotBase64 || '',
+        status: siteStatus,
+        durationMs: totalDuration,
+        errorMessage: siteError,
+        consoleErrors: Array.from(new Set(allConsoleErrors)).slice(-10),
+        screenshotBase64: siteScreenshot,
+        formResults,
         notificationsSent: { email: false, slack: false },
         executedAt: new Date(),
       });
 
       // Update site
-      site.lastStatus = result.status === 'passed' ? 'healthy' : 'failing';
+      site.lastStatus = siteStatus === 'passed' ? 'healthy' : 'failing';
       site.lastCheckedAt = new Date();
       await site.save();
 
       // Dispatch Notifications
-      const isFailed = result.status === 'failed';
+      const isFailed = siteStatus === 'failed';
       const prefs = site.notificationPreferences || {};
       const shouldNotify = isFailed || Boolean(prefs.notifyOnSuccess);
 
