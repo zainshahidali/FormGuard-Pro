@@ -258,14 +258,10 @@ function deduplicateForms(rawForms: any[]) {
   }
 
   return Array.from(uniqueFormsMap.values()).map((f, idx) => {
-    let cleanTitle = f.title;
-    if (f.occurrences > 1) {
-      cleanTitle = `${f.title} (Appears on ${f.occurrences} pages)`;
-    }
     return {
       ...f,
       id: `form-unique-${idx}`,
-      title: cleanTitle,
+      title: f.title,
       occurrences: f.occurrences,
       pagesFoundOn: f.pagesFoundOn,
     };

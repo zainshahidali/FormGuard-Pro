@@ -34,6 +34,14 @@ interface SiteFormProps {
 export default function SiteForm({ initialData, isEditing = false }: SiteFormProps) {
   const router = useRouter();
 
+  // Helper to sanitize clean form name (strips any auto-generated page counts)
+  const sanitizeName = (n: string) =>
+    (n || '')
+      .replace(/\s*\(Appears on \d+ pages?\)/gi, '')
+      .replace(/\s*\(Shared across \d+ pages?\)/gi, '')
+      .replace(/\s*\(Global.*?\)/gi, '')
+      .trim();
+
   // Basic Info
   const [name, setName] = useState(initialData?.name || '');
   const [url, setUrl] = useState(initialData?.url || '');
@@ -44,7 +52,7 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
   // Initialize Forms List (supports multi-form and legacy single-form sites)
   const initialFormsList: IFormItem[] =
     initialData?.forms && initialData.forms.length > 0
-      ? initialData.forms
+      ? initialData.forms.map((f: any) => ({ ...f, name: sanitizeName(f.name) }))
       : [
           {
             id: 'form-' + Math.random().toString(36).substring(2, 9),
@@ -337,7 +345,7 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
     }
 
     const convertedForms: IFormItem[] = selectedForms.map((df, i) => {
-      const cleanTitle = df.title || `${df.pageTitle || 'Page'} Form #${i + 1}`;
+      const cleanTitle = sanitizeName(df.title) || `${df.pageTitle || 'Page'} Form #${i + 1}`;
       return {
         id: df.id || 'form-' + Math.random().toString(36).substring(2, 9),
         name: cleanTitle,
