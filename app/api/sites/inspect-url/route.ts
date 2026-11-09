@@ -186,11 +186,34 @@ async function extractFormsFromPage(page: Page, pageUrl: string) {
         }
       }
 
+      // Extract plugin-specific form ID if present
+      let wpFormId = '';
+      const cf7Val = (container.querySelector('input[name="_wpcf7"]') as HTMLInputElement)?.value;
+      if (cf7Val) wpFormId = `cf7-${cf7Val}`;
+
+      const mfVal =
+        container.getAttribute('data-metform-form-id') ||
+        (container.querySelector('input[name="form_id"]') as HTMLInputElement)?.value;
+      if (mfVal) wpFormId = `metform-${mfVal}`;
+
+      const wpfVal =
+        container.getAttribute('data-formid') ||
+        (container.id && container.id.includes('wpforms') ? container.id : '');
+      if (wpfVal) wpFormId = `wpforms-${wpfVal}`;
+
+      // Fallback signature from field selectors and types
+      const fieldSig = fields
+        .map((f: any) => `${f.selector || f.label}:${f.type}`)
+        .sort()
+        .join('|');
+      const fingerprint = wpFormId || `${detectedPlugin}::${fieldSig}::${submitButtonSelector}`;
+
       return {
         id: `form-${currentUrl.replace(/[^a-zA-Z0-9]/g, '-')}-${index}`,
         pageUrl: currentUrl,
         pageTitle,
         title: formTitle,
+        fingerprint,
         detectedPlugin,
         fields,
         submitButtonSelector,
@@ -199,6 +222,54 @@ async function extractFormsFromPage(page: Page, pageUrl: string) {
       };
     });
   }, pageUrl);
+}
+
+// Smart deduplication helper to merge identical forms repeating across multiple pages
+function deduplicateForms(rawForms: any[]) {
+  const uniqueFormsMap = new Map<string, any>();
+
+  for (const form of rawForms) {
+    if (!form.fields || form.fields.length === 0) continue;
+
+    const fp = form.fingerprint || `${form.detectedPlugin}::${form.fields.length}::${form.submitButtonSelector}`;
+
+    if (!uniqueFormsMap.has(fp)) {
+      uniqueFormsMap.set(fp, {
+        ...form,
+        occurrences: 1,
+        pagesFoundOn: [form.pageUrl],
+      });
+    } else {
+      const existing = uniqueFormsMap.get(fp);
+      existing.occurrences += 1;
+      if (!existing.pagesFoundOn.includes(form.pageUrl)) {
+        existing.pagesFoundOn.push(form.pageUrl);
+      }
+
+      // Prioritize dedicated pages (e.g. /contact-us/, /quote/, /booking/) over generic pages (e.g. /)
+      const isCurrentDedicated = /contact|quote|estimate|book|inquiry|request|booking/i.test(form.pageUrl);
+      const isExistingDedicated = /contact|quote|estimate|book|inquiry|request|booking/i.test(existing.pageUrl);
+
+      if (isCurrentDedicated && !isExistingDedicated) {
+        existing.pageUrl = form.pageUrl;
+        existing.pageTitle = form.pageTitle;
+      }
+    }
+  }
+
+  return Array.from(uniqueFormsMap.values()).map((f, idx) => {
+    let cleanTitle = f.title;
+    if (f.occurrences > 1) {
+      cleanTitle = `${f.title} (Appears on ${f.occurrences} pages)`;
+    }
+    return {
+      ...f,
+      id: `form-unique-${idx}`,
+      title: cleanTitle,
+      occurrences: f.occurrences,
+      pagesFoundOn: f.pagesFoundOn,
+    };
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -244,7 +315,8 @@ export async function POST(req: NextRequest) {
 
     // Single-page scan or Deep multi-page crawl
     if (!deepScan) {
-      const forms = await extractFormsFromPage(page, url);
+      const rawForms = await extractFormsFromPage(page, url);
+      const forms = deduplicateForms(rawForms);
       if (!forms || forms.length === 0) {
         return NextResponse.json({
           success: false,
@@ -316,7 +388,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (allDiscoveredForms.length === 0) {
+    // Apply smart deduplication across all discovered forms
+    const uniqueForms = deduplicateForms(allDiscoveredForms);
+
+    if (uniqueForms.length === 0) {
       return NextResponse.json({
         success: false,
         error: `Scanned ${scannedUrls.length} pages across the website but no contact forms were found.`,
@@ -327,8 +402,8 @@ export async function POST(req: NextRequest) {
       success: true,
       deepScan: true,
       pagesScanned: scannedUrls.length,
-      count: allDiscoveredForms.length,
-      forms: allDiscoveredForms,
+      count: uniqueForms.length,
+      forms: uniqueForms,
     });
   } catch (error: any) {
     console.error('Error crawling website for forms:', error);

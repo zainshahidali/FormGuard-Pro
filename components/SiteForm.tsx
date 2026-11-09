@@ -626,6 +626,11 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
                             <span className="text-[10px] px-1.5 py-0.2 rounded bg-surface border border-surface-border text-sky-accent font-medium">
                               {df.detectedPlugin}
                             </span>
+                            {df.occurrences && df.occurrences > 1 && (
+                              <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 font-medium">
+                                Shared across {df.occurrences} pages
+                              </span>
+                            )}
                           </div>
 
                           {df.pageTitle && (
