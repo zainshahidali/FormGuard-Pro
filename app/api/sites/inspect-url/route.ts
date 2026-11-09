@@ -9,50 +9,120 @@ async function extractFormsFromPage(page: Page, pageUrl: string) {
   return await page.evaluate((pageUrl) => {
     const currentUrl = pageUrl || window.location.href;
     const formContainers: any[] = [];
+
+    // Helper to check if an element or its attributes match blacklisted widgets
+    const isBlacklisted = (el: Element) => {
+      const text = (
+        String(el.className || '') + ' ' +
+        String(el.id || '') + ' ' +
+        String(el.getAttribute('action') || '')
+      ).toLowerCase();
+
+      return (
+        text.includes('search') ||
+        text.includes('admin-bar') ||
+        text.includes('whatsapp') ||
+        text.includes('chaty') ||
+        text.includes('joinchat') ||
+        text.includes('qlwapp') ||
+        text.includes('wa-chat') ||
+        text.includes('click-to-chat') ||
+        text.includes('comment') ||
+        text.includes('login') ||
+        text.includes('woocommerce-cart') ||
+        text.includes('woocommerce-checkout') ||
+        text.includes('variations_form') ||
+        text.includes('wa.me') ||
+        text.includes('whatsapp.com')
+      );
+    };
+
+    // 1. Collect standard <form> tags (skipping blacklisted widgets)
     const rawForms = Array.from(document.querySelectorAll('form'));
     rawForms.forEach((f) => {
-      const idOrClass = (String(f.className || '') + ' ' + String(f.id || '') + ' ' + String(f.getAttribute('action') || '')).toLowerCase();
-      if (!idOrClass.includes('search') && !idOrClass.includes('admin-bar')) {
+      if (!isBlacklisted(f)) {
         formContainers.push(f);
       }
     });
 
+    // 2. MetForm can be rendered in a div (.metform-form-content)
     document.querySelectorAll('.metform-form-content').forEach((mf) => {
-      if (!formContainers.some((f) => f.contains(mf) || f === mf)) {
+      if (!isBlacklisted(mf) && !formContainers.some((f) => f.contains(mf) || f === mf)) {
         formContainers.push(mf);
+      }
+    });
+
+    // 3. Check for specific form plugin containers that might enclose forms
+    document.querySelectorAll('.elementor-widget-form form, .wpcf7 form, .wpforms-container form, .gform_wrapper form').forEach((wf) => {
+      if (!isBlacklisted(wf) && !formContainers.some((f) => f.contains(wf) || f === wf)) {
+        formContainers.push(wf);
       }
     });
 
     const pageTitle = (document.title || '').split('|')[0].split('-')[0].trim() || 'Page';
 
-    return formContainers.map((container, index) => {
+    const mapped = formContainers.map((container, index) => {
+      if (isBlacklisted(container)) {
+        return null;
+      }
+
       const formClasses = String(container.className || '');
       const formId = String(container.id || '');
 
-      let detectedPlugin = 'Custom';
+      // Strict WordPress Form Builder Detection:
+      // We ONLY accept forms created in: MetForm, Contact Form 7, Elementor Pro, WPForms, Gravity Forms
+      let detectedPlugin: string | null = null;
       let expectedSuccessValue = 'Thank you';
       let verificationMethod = 'text_visible';
 
-      if (formClasses.includes('metform') || container.querySelector('.metform-form-content') || document.querySelector('.metform-form-content')) {
+      if (
+        formClasses.includes('metform') ||
+        container.querySelector('.metform-form-content') ||
+        container.closest('.metform-form-content') ||
+        container.hasAttribute('data-metform-form-id') ||
+        container.querySelector('input[name="form_id"]')
+      ) {
         detectedPlugin = 'MetForm';
         verificationMethod = 'selector_visible';
         expectedSuccessValue = '.metform-success-message, .mf-response-msg-wrap';
-      } else if (formClasses.includes('elementor-form') || container.closest('.elementor-widget-form')) {
-        detectedPlugin = 'Elementor Pro';
-        verificationMethod = 'selector_visible';
-        expectedSuccessValue = '.elementor-message-success';
-      } else if (formClasses.includes('wpcf7')) {
+      } else if (
+        formClasses.includes('wpcf7') ||
+        container.querySelector('input[name="_wpcf7"]') ||
+        container.closest('.wpcf7')
+      ) {
         detectedPlugin = 'Contact Form 7';
         verificationMethod = 'selector_visible';
         expectedSuccessValue = '.wpcf7-mail-sent-ok, .wpcf7-response-output';
-      } else if (formClasses.includes('wpforms')) {
+      } else if (
+        formClasses.includes('elementor-form') ||
+        container.closest('.elementor-widget-form') ||
+        container.querySelector('[name^="form_fields"]')
+      ) {
+        detectedPlugin = 'Elementor Pro';
+        verificationMethod = 'selector_visible';
+        expectedSuccessValue = '.elementor-message-success';
+      } else if (
+        formClasses.includes('wpforms') ||
+        container.closest('.wpforms-container') ||
+        container.querySelector('[name^="wpforms"]') ||
+        container.hasAttribute('data-formid')
+      ) {
         detectedPlugin = 'WPForms';
         verificationMethod = 'selector_visible';
         expectedSuccessValue = 'div.wpforms-confirmation-container-full';
-      } else if (formClasses.includes('gform') || formId.startsWith('gform_')) {
+      } else if (
+        formClasses.includes('gform') ||
+        formId.startsWith('gform_') ||
+        container.closest('.gform_wrapper')
+      ) {
         detectedPlugin = 'Gravity Forms';
         verificationMethod = 'selector_visible';
         expectedSuccessValue = 'div.gform_confirmation_message';
+      }
+
+      // If the form does NOT belong to one of the verified WordPress form plugins, exclude it!
+      if (!detectedPlugin) {
+        return null;
       }
 
       // Title
@@ -221,6 +291,9 @@ async function extractFormsFromPage(page: Page, pageUrl: string) {
         expectedSuccessValue,
       };
     });
+
+    // Only return valid forms that belong to approved WordPress form plugins and have fields
+    return mapped.filter((f): f is NonNullable<typeof f> => f !== null && f.fields && f.fields.length > 0);
   }, pageUrl);
 }
 
