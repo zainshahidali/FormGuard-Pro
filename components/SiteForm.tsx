@@ -87,6 +87,7 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [isDetecting, setIsDetecting] = useState(false);
+  const [detectMode, setDetectMode] = useState<'single' | 'deep' | null>(null);
   const [detectedFormsList, setDetectedFormsList] = useState<any[]>([]);
   const [selectedFormIndex, setSelectedFormIndex] = useState<number | null>(null);
   const [testResult, setTestResult] = useState<any>(null);
@@ -96,6 +97,9 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
   // Apply a selected detected form
   const applyDetectedForm = (form: any, index: number) => {
     setSelectedFormIndex(index);
+    if (form.pageUrl && form.pageUrl !== url) {
+      setUrl(form.pageUrl);
+    }
     if (form.detectedPlugin) {
       setFormPluginType(form.detectedPlugin);
     }
@@ -113,19 +117,20 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
     }
 
     setPresetNotice(
-      `✨ Loaded "${form.title || form.detectedPlugin}" with ${form.fields?.length || 0} input fields! Check the fields below to customize test values.`
+      `✨ Loaded form "${form.title || form.detectedPlugin}" from ${form.pageTitle ? `"${form.pageTitle}"` : form.pageUrl || 'page'} with ${form.fields?.length || 0} input fields! Check the fields below to customize test values.`
     );
     setTimeout(() => setPresetNotice(null), 6000);
   };
 
   // Auto-Detect all form fields and selectors from live URL using Playwright
-  const handleAutoDetect = async () => {
+  const handleAutoDetect = async (isDeep: boolean = false) => {
     if (!url.trim() || !url.startsWith('http')) {
-      setErrorMsg('Please enter a valid page URL (starting with http:// or https://) first.');
+      setErrorMsg('Please enter a valid page or website URL (starting with http:// or https://) first.');
       return;
     }
 
     setIsDetecting(true);
+    setDetectMode(isDeep ? 'deep' : 'single');
     setErrorMsg(null);
     setDetectedFormsList([]);
     setSelectedFormIndex(null);
@@ -134,7 +139,7 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
       const res = await fetch('/api/sites/inspect-url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim() }),
+        body: JSON.stringify({ url: url.trim(), deepScan: isDeep }),
       });
 
       const json = await res.json();
@@ -144,7 +149,7 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
 
       const forms = json.forms || (json.data ? [json.data] : []);
       if (forms.length === 0) {
-        throw new Error('No forms detected on this page.');
+        throw new Error('No forms detected on this website/page.');
       }
 
       setDetectedFormsList(forms);
@@ -167,6 +172,7 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
       setErrorMsg(detectErr.message || 'Auto-detection failed.');
     } finally {
       setIsDetecting(false);
+      setDetectMode(null);
     }
   };
 
@@ -384,74 +390,121 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
           </div>
 
           <div className="md:col-span-2 space-y-1.5">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <label className="text-xs font-medium text-slate-300">
-                Exact Page URL with Form <span className="text-red-400">*</span>
+                Target Website / Page URL <span className="text-red-400">*</span>
               </label>
-              <button
-                type="button"
-                onClick={handleAutoDetect}
-                disabled={isDetecting || !url.trim()}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-semibold text-sky-accent bg-sky-accent/10 hover:bg-sky-accent/20 border border-sky-accent/30 transition-all disabled:opacity-40"
-              >
-                {isDetecting ? (
-                  <>
-                    <Loader2 className="w-3 h-3 animate-spin" /> Scanning Page DOM...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-3 h-3" /> Auto-Detect Form from Live URL
-                  </>
-                )}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleAutoDetect(false)}
+                  disabled={isDetecting || !url.trim()}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-semibold text-slate-300 bg-navy-800 hover:bg-surface-hover border border-surface-border transition-all disabled:opacity-40"
+                  title="Scan only the specific URL entered below"
+                >
+                  {isDetecting && detectMode === 'single' ? (
+                    <>
+                      <Loader2 className="w-3 h-3 animate-spin text-sky-accent" /> Scanning Page...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3 h-3 text-sky-accent" /> Scan Current Page
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleAutoDetect(true)}
+                  disabled={isDetecting || !url.trim()}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded text-[11px] font-semibold text-white bg-gradient-to-r from-sky-accent/80 to-teal-light/80 hover:from-sky-accent hover:to-teal-light border border-sky-accent/40 shadow-sm transition-all disabled:opacity-40"
+                  title="Crawl internal pages (Contact, Quote, Services) to find all forms on the entire site"
+                >
+                  {isDetecting && detectMode === 'deep' ? (
+                    <>
+                      <Loader2 className="w-3 h-3 animate-spin text-white" /> Crawling Entire Website...
+                    </>
+                  ) : (
+                    <>
+                      <Globe className="w-3.5 h-3.5 text-white" /> 🌐 Deep Crawl Entire Website
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
             <input
               type="url"
               required
-              placeholder="https://example.com/contact-us"
+              placeholder="https://example.com/ (Enter homepage or specific page URL)"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               className="w-full bg-navy-800 border border-surface-border rounded-lg px-3.5 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-accent transition-colors"
             />
+            <p className="text-[11px] text-slate-400">
+              💡 Tip: Enter the homepage URL and click <strong>&quot;Deep Crawl Entire Website&quot;</strong> to automatically scan all pages (Contact, Services, Quotes) and list every form found.
+            </p>
 
             {/* Live Detected Forms Picker */}
             {detectedFormsList.length > 0 && (
-              <div className="pt-2 space-y-2">
+              <div className="pt-3 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-sky-accent flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5" /> Detected Forms on this Page ({detectedFormsList.length})
+                    <Sparkles className="w-3.5 h-3.5" /> Discovered Forms ({detectedFormsList.length})
                   </span>
                   <span className="text-[11px] text-slate-400">
-                    Click a form to populate its inputs & test values below
+                    Click any form to auto-load its page URL, plugin type & fields
                   </span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                   {detectedFormsList.map((df, fIdx) => (
                     <button
                       key={df.id || fIdx}
                       type="button"
                       onClick={() => applyDetectedForm(df, fIdx)}
-                      className={`p-3 rounded-lg border text-left transition-all flex items-start justify-between gap-2 ${
+                      className={`p-3.5 rounded-lg border text-left transition-all flex items-start justify-between gap-3 ${
                         selectedFormIndex === fIdx
-                          ? 'bg-sky-accent/20 border-sky-accent text-white shadow-sm'
+                          ? 'bg-sky-accent/20 border-sky-accent text-white shadow-md ring-1 ring-sky-accent/40'
                           : 'bg-navy-900 border-surface-border hover:border-slate-500 text-slate-300'
                       }`}
                     >
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-semibold text-slate-100">
+                      <div className="space-y-1 overflow-hidden flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-bold text-white truncate max-w-[200px]">
                             {df.title || `Form #${fIdx + 1}`}
                           </span>
-                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-surface border border-surface-border text-slate-300">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface border border-surface-border text-sky-accent font-medium">
                             {df.detectedPlugin}
                           </span>
                         </div>
-                        <p className="text-[11px] text-slate-400 mt-0.5">
-                          {df.fields?.length || 0} inputs detected • Click to inspect & test
-                        </p>
+
+                        {df.pageTitle && (
+                          <div className="flex items-center gap-1 text-[11px] text-teal-light font-medium truncate">
+                            <span>📄 Page: {df.pageTitle}</span>
+                          </div>
+                        )}
+
+                        {df.pageUrl && (
+                          <div className="text-[10px] text-slate-400 truncate max-w-[280px]">
+                            🔗 {df.pageUrl}
+                          </div>
+                        )}
+
+                        <div className="text-[11px] text-slate-300 pt-1 flex items-center gap-1.5">
+                          <span className="font-semibold text-white">{df.fields?.length || 0} inputs:</span>
+                          <span className="text-slate-400 truncate max-w-[220px]">
+                            {df.fields?.map((f: any) => f.label).filter(Boolean).join(', ')}
+                          </span>
+                        </div>
                       </div>
-                      {selectedFormIndex === fIdx && (
-                        <CheckCircle2 className="w-4 h-4 text-sky-accent shrink-0 mt-0.5" />
+
+                      {selectedFormIndex === fIdx ? (
+                        <div className="shrink-0 flex items-center gap-1 bg-sky-accent text-white text-[10px] font-bold px-2 py-0.5 rounded shadow">
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Selected
+                        </div>
+                      ) : (
+                        <span className="shrink-0 text-[10px] text-slate-400 border border-surface-border px-2 py-0.5 rounded hover:border-slate-400">
+                          Select
+                        </span>
                       )}
                     </button>
                   ))}
