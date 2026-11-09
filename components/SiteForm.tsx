@@ -206,7 +206,13 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
       if (updated[activeFormIndex]) {
         const curFields = [...(updated[activeFormIndex].fields || [])];
         if (curFields[fIdx]) {
-          curFields[fIdx] = { ...curFields[fIdx], [key]: value };
+          const updatedField = { ...curFields[fIdx], [key]: value };
+          if (key === 'type' && value === 'file') {
+            if (!updatedField.testValue || updatedField.testValue === 'FormGuard QA Bot') {
+              updatedField.testValue = '[Dummy Black Image]';
+            }
+          }
+          curFields[fIdx] = updatedField;
           updated[activeFormIndex] = {
             ...updated[activeFormIndex],
             fields: curFields,
@@ -908,6 +914,7 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
                           <option value="textarea">Textarea</option>
                           <option value="select">Select</option>
                           <option value="checkbox">Checkbox</option>
+                          <option value="file">File / Image Upload</option>
                         </select>
                       </div>
 
@@ -917,10 +924,12 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
                         </label>
                         <input
                           type="text"
-                          placeholder="Value to fill"
+                          placeholder={field.type === 'file' ? '[Dummy Black Image]' : 'Value to fill'}
                           value={field.testValue}
                           onChange={(e) => handleUpdateActiveFormField(fIdx, 'testValue', e.target.value)}
-                          className="w-full bg-navy-900 border border-surface-border rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-sky-accent"
+                          className={`w-full bg-navy-900 border border-surface-border rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-sky-accent ${
+                            field.type === 'file' ? 'text-teal-400 font-mono text-[11px]' : ''
+                          }`}
                         />
                       </div>
 

@@ -3,7 +3,7 @@ import mongoose, { Schema, Document, Model } from 'mongoose';
 export interface IFormField {
   label: string;
   selector: string;
-  type: 'text' | 'email' | 'tel' | 'textarea' | 'select' | 'checkbox';
+  type: 'text' | 'email' | 'tel' | 'textarea' | 'select' | 'checkbox' | 'file';
   testValue: string;
 }
 
@@ -55,7 +55,7 @@ const FormFieldSchema = new Schema<IFormField>(
     selector: { type: String, required: true },
     type: {
       type: String,
-      enum: ['text', 'email', 'tel', 'textarea', 'select', 'checkbox'],
+      enum: ['text', 'email', 'tel', 'textarea', 'select', 'checkbox', 'file'],
       default: 'text',
     },
     testValue: { type: String, default: '' },

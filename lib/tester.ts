@@ -1,6 +1,7 @@
 import { chromium, Browser, Page } from 'playwright';
 import { ISite } from '@/models/Site';
 import { IFormTestResult } from '@/models/TestLog';
+import { getOrCreateDummyUploadImage } from '@/lib/dummy-asset';
 
 export interface TestResult {
   status: 'passed' | 'failed';
@@ -88,12 +89,17 @@ export async function runFormTest(site: ISite | any): Promise<TestResult> {
           const inputTypeAttr = await locator.getAttribute('type').catch(() => null);
           const isHidden = inputTypeAttr === 'hidden';
           const isSelectType = fieldType === 'select';
+          const isFileType = fieldType === 'file' || inputTypeAttr === 'file';
 
           // Check if custom dropdown container (like MetForm/React-Select/Elementor custom select) exists
           const customControl = locator.locator('xpath=..').locator('.mf_select__control, .mf-input-select, [class*="select__control"], [class*="custom-select"]').first();
           const hasCustomControl = (await customControl.count().catch(() => 0)) > 0;
 
-          if (hasCustomControl || (isSelectType && isHidden)) {
+          if (isFileType) {
+            // Automatically upload dummy black image for media/file upload fields
+            const dummyFilePath = getOrCreateDummyUploadImage();
+            await locator.setInputFiles(dummyFilePath, { timeout: 8000 });
+          } else if (hasCustomControl || (isSelectType && isHidden)) {
             // Modern AJAX / MetForm dropdown handling with live random option picking
             try {
               const clickTarget = hasCustomControl
@@ -177,6 +183,12 @@ export async function runFormTest(site: ISite | any): Promise<TestResult> {
                   await locator.uncheck({ force: true });
                 }
                 break;
+
+              case 'file': {
+                const dummyFilePath = getOrCreateDummyUploadImage();
+                await locator.setInputFiles(dummyFilePath, { timeout: 8000 });
+                break;
+              }
 
               case 'textarea':
               case 'text':

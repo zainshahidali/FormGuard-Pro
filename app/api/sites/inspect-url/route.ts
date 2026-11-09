@@ -319,6 +319,19 @@ async function extractFormsFromPage(page: Page, pageUrl: string) {
         } else if (typeAttr === 'checkbox') {
           fieldType = 'checkbox';
           testValue = 'true';
+        } else if (
+          typeAttr === 'file' ||
+          nameAttr.toLowerCase().includes('resume') ||
+          nameAttr.toLowerCase().includes('upload') ||
+          nameAttr.toLowerCase().includes('attachment')
+        ) {
+          fieldType = 'file';
+          testValue = '[Dummy Black Image]';
+          if (nameAttr) {
+            selector = `input[type="file"][name="${nameAttr}"], input[name="${nameAttr}"]`;
+          } else if (idAttr) {
+            selector = `input[type="file"]#${idAttr}, #${idAttr}`;
+          }
         }
 
         fields.push({
