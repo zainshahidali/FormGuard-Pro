@@ -86,7 +86,7 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
     initialData?.forms && initialData.forms.length > 0
       ? initialData.forms.map((f: any) => ({ ...f, name: sanitizeName(f.name) }))
       : isEditing && initialData?.fields && initialData.fields.length > 0
-      ? [
+        ? [
           {
             id: 'form-' + Math.random().toString(36).substring(2, 9),
             name: initialData?.name ? `${initialData.name} Form` : 'Primary Contact Form',
@@ -105,7 +105,7 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
             isActive: true,
           },
         ]
-      : [];
+        : [];
 
   const [forms, setForms] = useState<IFormItem[]>(initialFormsList);
   const [activeFormIndex, setActiveFormIndex] = useState<number>(0);
@@ -491,9 +491,9 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
           customEmails:
             alertMode === 'custom'
               ? customEmails
-                  .split(',')
-                  .map((e: string) => e.trim())
-                  .filter(Boolean)
+                .split(',')
+                .map((e: string) => e.trim())
+                .filter(Boolean)
               : [],
           enableSlack: alertMode === 'custom' ? !!customWebhookUrl.trim() : true,
           customSlackWebhookUrl: alertMode === 'custom' ? customWebhookUrl.trim() : '',
@@ -516,8 +516,7 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
       }
 
       notify(
-        `Website "${siteName}" saved successfully with ${forms.length} monitored ${
-          forms.length === 1 ? 'form' : 'forms'
+        `Website "${siteName}" saved successfully with ${forms.length} monitored ${forms.length === 1 ? 'form' : 'forms'
         }!`,
         'success'
       );
@@ -575,20 +574,18 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
               <div key={step.n} className="flex items-center gap-3">
                 <div className="flex items-center gap-2">
                   <span
-                    className={`grid h-6 w-6 place-items-center rounded-full text-[10px] font-bold ${
-                      forms.length > 0 && i === 0
+                    className={`grid h-6 w-6 place-items-center rounded-full text-[10px] font-bold ${forms.length > 0 && i === 0
                         ? 'bg-[#e7f8f2] text-mint'
                         : i === 1
-                        ? 'bg-cobalt text-white'
-                        : 'bg-[#eef1ff] text-cobalt'
-                    }`}
+                          ? 'bg-cobalt text-white'
+                          : 'bg-[#eef1ff] text-cobalt'
+                      }`}
                   >
                     {forms.length > 0 && i === 0 ? <Check size={12} strokeWidth={3} /> : step.n}
                   </span>
                   <span
-                    className={`hidden text-[11.5px] font-semibold sm:block ${
-                      i === 1 ? 'text-ink' : 'text-[#98a4b8]'
-                    }`}
+                    className={`hidden text-[11.5px] font-semibold sm:block ${i === 1 ? 'text-ink' : 'text-[#98a4b8]'
+                      }`}
                   >
                     {step.label}
                   </span>
@@ -762,11 +759,10 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
                           onClick={() =>
                             setSelectedDiscovered((prev) => ({ ...prev, [idx]: !prev[idx] }))
                           }
-                          className={`cursor-pointer rounded-xl border p-3.5 text-left transition-all ${
-                            isSelected
+                          className={`cursor-pointer rounded-xl border p-3.5 text-left transition-all ${isSelected
                               ? 'border-[#aebcf8] bg-[#f4f6ff] shadow-[0_3px_12px_rgba(60,86,232,.07)]'
                               : 'border-line bg-white hover:border-[#c5cfe4] hover:bg-[#fcfdff]'
-                          }`}
+                            }`}
                         >
                           <div className="flex items-start gap-3">
                             <span className={`checkbox mt-0.5 ${isSelected ? 'on' : ''}`}>
@@ -833,23 +829,20 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
                   return (
                     <div
                       key={form.id || fIdx}
-                      className={`group relative flex shrink-0 items-center rounded-t-lg border-b-2 transition ${
-                        isActiveTab
+                      className={`group relative flex shrink-0 items-center rounded-t-lg border-b-2 transition ${isActiveTab
                           ? 'border-cobalt bg-white'
                           : 'border-transparent hover:bg-white/70'
-                      }`}
+                        }`}
                     >
                       <button
                         type="button"
                         onClick={() => setActiveFormIndex(fIdx)}
-                        className={`flex max-w-[220px] items-center gap-2 px-3.5 py-3 text-[11.5px] font-semibold ${
-                          isActiveTab ? 'text-cobalt' : 'text-[#728199]'
-                        }`}
+                        className={`flex max-w-[220px] items-center gap-2 px-3.5 py-3 text-[11.5px] font-semibold ${isActiveTab ? 'text-cobalt' : 'text-[#728199]'
+                          }`}
                       >
                         <span
-                          className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                            form.isActive !== false ? 'bg-mint' : 'bg-[#c1cad9]'
-                          }`}
+                          className={`h-1.5 w-1.5 shrink-0 rounded-full ${form.isActive !== false ? 'bg-mint' : 'bg-[#c1cad9]'
+                            }`}
                         />
                         <span className="truncate">{form.name || `Form #${fIdx + 1}`}</span>
                         <span className="shrink-0 text-[10px] font-medium text-[#a3aec1]">
@@ -964,11 +957,10 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
                             key={preset}
                             type="button"
                             onClick={() => applyPreset(preset)}
-                            className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${
-                              activeForm.formPluginType === preset
+                            className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition ${activeForm.formPluginType === preset
                                 ? 'border-cobalt bg-[#eef1ff] text-cobalt'
                                 : 'border-line bg-white text-[#71809a] hover:border-[#bdc8e2] hover:text-cobalt'
-                            }`}
+                              }`}
                           >
                             {preset}
                           </button>
@@ -1143,17 +1135,15 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
                 <button
                   type="button"
                   onClick={() => setAlertMode('global')}
-                  className={`rounded-xl border p-4 text-left transition ${
-                    alertMode === 'global'
+                  className={`rounded-xl border p-4 text-left transition ${alertMode === 'global'
                       ? 'border-cobalt bg-[#f5f7ff] shadow-[0_3px_14px_rgba(60,86,232,.09)]'
                       : 'border-line bg-white hover:border-[#c5cfe4]'
-                  }`}
+                    }`}
                 >
                   <div className="flex items-start gap-3">
                     <span
-                      className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border-2 ${
-                        alertMode === 'global' ? 'border-cobalt' : 'border-[#cbd5e3]'
-                      }`}
+                      className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border-2 ${alertMode === 'global' ? 'border-cobalt' : 'border-[#cbd5e3]'
+                        }`}
                     >
                       {alertMode === 'global' && <span className="h-1.5 w-1.5 rounded-full bg-cobalt" />}
                     </span>
@@ -1177,17 +1167,15 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
                 <button
                   type="button"
                   onClick={() => setAlertMode('custom')}
-                  className={`rounded-xl border p-4 text-left transition ${
-                    alertMode === 'custom'
+                  className={`rounded-xl border p-4 text-left transition ${alertMode === 'custom'
                       ? 'border-cobalt bg-[#f5f7ff] shadow-[0_3px_14px_rgba(60,86,232,.09)]'
                       : 'border-line bg-white hover:border-[#c5cfe4]'
-                  }`}
+                    }`}
                 >
                   <div className="flex items-start gap-3">
                     <span
-                      className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border-2 ${
-                        alertMode === 'custom' ? 'border-cobalt' : 'border-[#cbd5e3]'
-                      }`}
+                      className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border-2 ${alertMode === 'custom' ? 'border-cobalt' : 'border-[#cbd5e3]'
+                        }`}
                     >
                       {alertMode === 'custom' && <span className="h-1.5 w-1.5 rounded-full bg-cobalt" />}
                     </span>

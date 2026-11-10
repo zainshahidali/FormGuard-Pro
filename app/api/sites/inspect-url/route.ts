@@ -9,7 +9,7 @@ async function discoverSiteCandidateUrls(baseUrl: string, page: Page): Promise<s
   const origin = new URL(baseUrl).origin;
   const discovered = new Set<string>([origin + '/']);
 
-  // 1. Try common WordPress XML sitemaps (RankMath, Yoast, Core WP)
+  // 1. Try common WordPress XML sitemaps (RankMath, Yoast, Core WP) concurrently
   const sitemapEndpoints = [
     `${origin}/page-sitemap.xml`,
     `${origin}/wp-sitemap-posts-page-1.xml`,
@@ -17,11 +17,11 @@ async function discoverSiteCandidateUrls(baseUrl: string, page: Page): Promise<s
     `${origin}/sitemap.xml`,
   ];
 
-  for (const smUrl of sitemapEndpoints) {
+  const sitemapTasks = sitemapEndpoints.map(async (smUrl) => {
     try {
       const res = await fetch(smUrl, {
         headers: { 'User-Agent': 'Mozilla/5.0 FormGuardPro/1.0' },
-        signal: AbortSignal.timeout(4000),
+        signal: AbortSignal.timeout(2500),
       });
       if (res.ok) {
         const text = await res.text();
@@ -34,10 +34,11 @@ async function discoverSiteCandidateUrls(baseUrl: string, page: Page): Promise<s
             }
           });
         }
-        if (discovered.size > 5) break;
       }
     } catch {}
-  }
+  });
+
+  await Promise.allSettled(sitemapTasks);
 
   // 2. Also harvest links from page DOM
   try {
@@ -85,9 +86,9 @@ function selectPriorityPages(urls: string[], baseUrl: string): string[] {
     matches.slice(0, 2).forEach((m) => selected.add(m));
   }
 
-  // Fill up to 11 pages total with remaining URLs
+  // Fill up to 8 pages total with remaining URLs
   for (const u of urls) {
-    if (selected.size >= 11) break;
+    if (selected.size >= 8) break;
     selected.add(u);
   }
 
@@ -473,16 +474,26 @@ export async function POST(req: NextRequest) {
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 FormGuardPro/1.0',
     });
 
+    // Speed optimization: Block heavy media (images, fonts, media) and external analytics trackers.
+    // HTML, CSS, and JS scripts are fully preserved so form builders (MetForm, CF7, Elementor, WPForms) render 100% accurately.
+    await context.route(
+      /\.(png|jpe?g|gif|webp|svg|ico|mp4|webm|mp3|wav|ogg|avi|mov|woff2?|ttf|eot|otf)(\?.*)?$/i,
+      (route) => route.abort()
+    );
+    await context.route(
+      /google-analytics|googletagmanager|facebook\.net|connect\.facebook|hotjar|clarity\.ms|doubleclick|pixel/i,
+      (route) => route.abort()
+    );
+
     const page: Page = await context.newPage();
 
     // 1. Visit the root URL
     try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 35000 });
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 });
       // Wait for dynamic/React form builders like MetForm or Elementor to render
       await page.waitForSelector('form, .metform-form-content, .elementor-form, .wpforms-container, .wpcf7-form', {
-        timeout: 8000,
+        timeout: 2500,
       }).catch(() => {});
-      await page.waitForTimeout(2000);
     } catch (navErr: any) {
       return NextResponse.json(
         { success: false, error: `Failed to load page: ${navErr.message || String(navErr)}` },
@@ -517,23 +528,33 @@ export async function POST(req: NextRequest) {
       allDiscoveredForms.push(...firstPageForms);
     }
 
-    // Crawl prioritized pages across the entire site
-    for (const pageUrl of uniquePages) {
-      if (pageUrl === url) continue;
-      try {
-        await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-        await page.waitForSelector('form, .metform-form-content, .elementor-form, .wpforms-container, .wpcf7-form', {
-          timeout: 4000,
-        }).catch(() => {});
-        await page.waitForTimeout(600);
-        scannedUrls.push(pageUrl);
-        const formsOnPage = await extractFormsFromPage(page, pageUrl);
-        if (formsOnPage && formsOnPage.length > 0) {
-          allDiscoveredForms.push(...formsOnPage);
-        }
-      } catch (pageErr: any) {
-        console.warn(`[Crawler] Skipping ${pageUrl}:`, pageErr.message);
-      }
+    // Crawl prioritized pages across the entire site in parallel batches (concurrency: 2 to prevent server-side queuing)
+    const subPageUrls = uniquePages.filter((p) => p !== url);
+    const BATCH_SIZE = 2;
+
+    for (let i = 0; i < subPageUrls.length; i += BATCH_SIZE) {
+      const batch = subPageUrls.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(async (pageUrl) => {
+          const subPage = await context.newPage();
+          try {
+            await subPage.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 8000 });
+            await subPage.waitForSelector(
+              'form, .metform-form-content, .elementor-form, .wpforms-container, .wpcf7-form',
+              { timeout: 1500 }
+            ).catch(() => {});
+            scannedUrls.push(pageUrl);
+            const formsOnPage = await extractFormsFromPage(subPage, pageUrl);
+            if (formsOnPage && formsOnPage.length > 0) {
+              allDiscoveredForms.push(...formsOnPage);
+            }
+          } catch (pageErr: any) {
+            console.warn(`[Crawler] Skipping ${pageUrl}:`, pageErr.message);
+          } finally {
+            await subPage.close().catch(() => {});
+          }
+        })
+      );
     }
 
     // Apply smart deduplication across all discovered forms
