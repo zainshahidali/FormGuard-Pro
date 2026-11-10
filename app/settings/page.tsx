@@ -28,7 +28,7 @@ export default function SettingsPage() {
   const [emails, setEmails] = useState('');
   const [slackWebhookUrl, setSlackWebhookUrl] = useState('');
   const [slackChannelName, setSlackChannelName] = useState('');
-  const [testBotEmail, setTestBotEmail] = useState('qa-bot@formguardpro.com');
+  const [testBotEmail, setTestBotEmail] = useState('test@gmail.com');
 
   // SMTP Settings
   const [smtpHost, setSmtpHost] = useState('');
@@ -67,7 +67,7 @@ export default function SettingsPage() {
           setEmails(s.defaultNotificationEmails?.join(', ') || 'zanshahidali@gmail.com');
           setSlackWebhookUrl(s.defaultSlackWebhookUrl || '');
           setSlackChannelName(s.defaultSlackChannelName || '#alerts');
-          setTestBotEmail(s.testBotEmail || 'qa-bot@formguardpro.com');
+          setTestBotEmail(s.testBotEmail || 'test@gmail.com');
 
           if (s.smtpConfig) {
             setSmtpHost(s.smtpConfig.host || '');

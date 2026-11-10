@@ -108,7 +108,7 @@ async function seed() {
           pass: '',
           fromEmail: 'alerts@formguardpro.com',
         },
-        testBotEmail: 'qa-bot@formguardpro.com',
+        testBotEmail: 'test@gmail.com',
       });
       console.log('✅ Seeded default global Settings.');
     }
@@ -120,10 +120,10 @@ async function seed() {
         url: 'https://stowlineroofing.com/contact-us',
         formPluginType: 'Elementor Pro',
         fields: [
-          { label: 'Name', selector: 'input[name="form_fields[name]"]', type: 'text', testValue: 'FormGuard QA Bot' },
-          { label: 'Email', selector: 'input[name="form_fields[email]"]', type: 'email', testValue: 'qa-bot@formguardpro.com' },
+          { label: 'Name', selector: 'input[name="form_fields[name]"]', type: 'text', testValue: 'Test User' },
+          { label: 'Email', selector: 'input[name="form_fields[email]"]', type: 'email', testValue: 'test@gmail.com' },
           { label: 'Phone', selector: 'input[name="form_fields[field_phone]"]', type: 'tel', testValue: '+1 555-019-2834' },
-          { label: 'Message', selector: 'textarea[name="form_fields[message]"]', type: 'textarea', testValue: 'Daily form health check test entry.' },
+          { label: 'Message', selector: 'textarea[name="form_fields[message]"]', type: 'textarea', testValue: 'Testing' },
         ],
         submitButtonSelector: 'button.elementor-button[type="submit"]',
         verificationMethod: 'selector_visible',
@@ -145,10 +145,10 @@ async function seed() {
         url: 'https://urbandentalclinic.com/book-appointment',
         formPluginType: 'Contact Form 7',
         fields: [
-          { label: 'Your Name', selector: 'input[name="your-name"]', type: 'text', testValue: 'FormGuard QA Bot' },
-          { label: 'Your Email', selector: 'input[name="your-email"]', type: 'email', testValue: 'qa-bot@formguardpro.com' },
+          { label: 'Your Name', selector: 'input[name="your-name"]', type: 'text', testValue: 'Test User' },
+          { label: 'Your Email', selector: 'input[name="your-email"]', type: 'email', testValue: 'test@gmail.com' },
           { label: 'Your Phone', selector: 'input[name="your-tel"]', type: 'tel', testValue: '+1 555-019-2834' },
-          { label: 'Message', selector: 'textarea[name="your-message"]', type: 'textarea', testValue: 'Daily form health check test entry.' },
+          { label: 'Message', selector: 'textarea[name="your-message"]', type: 'textarea', testValue: 'Testing' },
         ],
         submitButtonSelector: 'input.wpcf7-submit',
         verificationMethod: 'selector_visible',
@@ -170,9 +170,9 @@ async function seed() {
         url: 'https://apexlegalpartners.com/free-consultation',
         formPluginType: 'WPForms',
         fields: [
-          { label: 'First Name', selector: 'input.wpforms-field-name-first', type: 'text', testValue: 'FormGuard QA Bot' },
-          { label: 'Email', selector: 'input[type="email"].wpforms-field-email', type: 'email', testValue: 'qa-bot@formguardpro.com' },
-          { label: 'Message', selector: 'textarea.wpforms-field-medium', type: 'textarea', testValue: 'Consultation request test.' },
+          { label: 'First Name', selector: 'input.wpforms-field-name-first', type: 'text', testValue: 'Test User' },
+          { label: 'Email', selector: 'input[type="email"].wpforms-field-email', type: 'email', testValue: 'test@gmail.com' },
+          { label: 'Message', selector: 'textarea.wpforms-field-medium', type: 'textarea', testValue: 'Testing' },
         ],
         submitButtonSelector: 'button.wpforms-submit[type="submit"]',
         verificationMethod: 'selector_visible',

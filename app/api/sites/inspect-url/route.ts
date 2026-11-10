@@ -302,17 +302,17 @@ async function extractFormsFromPage(page: Page, pageUrl: string) {
 
         // Type & sensible test value
         let fieldType = 'text';
-        let testValue = 'FormGuard QA Bot';
+        let testValue = 'Test User';
 
         if (typeAttr === 'email' || nameAttr.toLowerCase().includes('email')) {
           fieldType = 'email';
-          testValue = 'qa-bot@formguardpro.com';
+          testValue = 'test@gmail.com';
         } else if (typeAttr === 'tel' || nameAttr.toLowerCase().includes('phone') || nameAttr.toLowerCase().includes('tel')) {
           fieldType = 'tel';
           testValue = '+1 555-019-2834';
         } else if (tagName === 'textarea' || nameAttr.toLowerCase().includes('message')) {
           fieldType = 'textarea';
-          testValue = 'FormGuard Pro automated health check test submission.';
+          testValue = 'Testing';
         } else if (tagName === 'select' || nameAttr.toLowerCase().includes('service') || typeAttr === 'hidden') {
           fieldType = 'select';
           testValue = '[Random Option]';

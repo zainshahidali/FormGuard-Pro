@@ -83,7 +83,13 @@ export async function runFormTest(site: ISite | any): Promise<TestResult> {
           await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
 
           const fieldType = (field.type || 'text').toLowerCase();
-          const valToFill = field.testValue || 'Test Value';
+          const valToFill =
+            field.testValue ||
+            (fieldType === 'email'
+              ? 'test@gmail.com'
+              : fieldType === 'textarea'
+              ? 'Testing'
+              : 'Test User');
           const wantsRandom = !valToFill || valToFill === '[Random Option]' || valToFill.toLowerCase().includes('random');
 
           const inputTypeAttr = await locator.getAttribute('type').catch(() => null);

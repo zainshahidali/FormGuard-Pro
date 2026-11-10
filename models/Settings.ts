@@ -41,7 +41,7 @@ const SettingsSchema = new Schema<ISettings>(
     },
     testBotEmail: {
       type: String,
-      default: 'qa-bot@formguardpro.com',
+      default: 'test@gmail.com',
     },
   },
   {

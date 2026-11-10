@@ -230,7 +230,7 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
               label: 'New Field',
               selector: 'input[name=""]',
               type: 'text',
-              testValue: 'FormGuard QA Bot',
+              testValue: 'Test User',
             },
           ],
         };

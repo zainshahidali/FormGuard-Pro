@@ -59,10 +59,10 @@ server.listen(4892, async () => {
     url: 'http://localhost:4892',
     formPluginType: 'Elementor Pro',
     fields: [
-      { label: 'Name', selector: 'input[name="form_fields[name]"]', type: 'text', testValue: 'FormGuard QA Bot' },
-      { label: 'Email', selector: 'input[name="form_fields[email]"]', type: 'email', testValue: 'qa-bot@formguardpro.com' },
+      { label: 'Name', selector: 'input[name="form_fields[name]"]', type: 'text', testValue: 'Test User' },
+      { label: 'Email', selector: 'input[name="form_fields[email]"]', type: 'email', testValue: 'test@gmail.com' },
       { label: 'Phone', selector: 'input[name="form_fields[field_phone]"]', type: 'tel', testValue: '+1 555-019-2834' },
-      { label: 'Message', selector: 'textarea[name="form_fields[message]"]', type: 'textarea', testValue: 'Automated test verification.' },
+      { label: 'Message', selector: 'textarea[name="form_fields[message]"]', type: 'textarea', testValue: 'Testing' },
     ],
     submitButtonSelector: 'form.elementor-form button[type="submit"]',
     verificationMethod: 'selector_visible',

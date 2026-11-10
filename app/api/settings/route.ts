@@ -20,7 +20,7 @@ export async function GET() {
           pass: '',
           fromEmail: 'alerts@formguardpro.com',
         },
-        testBotEmail: 'qa-bot@formguardpro.com',
+        testBotEmail: 'test@gmail.com',
       });
     }
     return NextResponse.json({ success: true, settings });
