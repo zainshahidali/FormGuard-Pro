@@ -384,16 +384,25 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
     }
 
     const imported: IFormItem[] = chosen.map((df: any, idx: number) => {
-      const cleanName = sanitizeName(df.name || `Form #${idx + 1}`);
+      const cleanName = sanitizeName(df.name || df.title || `Form #${idx + 1}`);
+      const pluginType = (df.formPluginType || df.detectedPlugin || 'MetForm') as any;
+      const presetFallback = FORM_PRESETS[pluginType] || FORM_PRESETS['MetForm'];
+
       return {
         id: 'form-' + Math.random().toString(36).substring(2, 9),
         name: cleanName,
         pageUrl: df.pageUrl || siteUrl,
-        formPluginType: df.formPluginType || 'Contact Form 7',
-        fields: df.fields && df.fields.length > 0 ? df.fields : [...FORM_PRESETS['Contact Form 7'].fields],
-        submitButtonSelector: df.submitButtonSelector || 'input[type="submit"]',
-        verificationMethod: df.verificationMethod || 'selector_visible',
-        expectedSuccessValue: df.expectedSuccessValue || '.wpcf7-mail-sent-ok',
+        formPluginType: pluginType,
+        fields:
+          df.fields && df.fields.length > 0
+            ? df.fields
+            : [...presetFallback.fields],
+        submitButtonSelector:
+          df.submitButtonSelector || presetFallback.submitButtonSelector,
+        verificationMethod:
+          df.verificationMethod || presetFallback.verificationMethod,
+        expectedSuccessValue:
+          df.expectedSuccessValue || presetFallback.expectedSuccessValue,
         isActive: true,
       };
     });
@@ -769,7 +778,7 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
                                   {sanitizeName(item.name || `Form #${idx + 1}`)}
                                 </p>
                                 <span className="pill shrink-0 bg-white text-[#6c7b95] ring-1 ring-[#e2e8f2]">
-                                  {item.formPluginType || 'Contact Form 7'}
+                                  {item.formPluginType || item.detectedPlugin || 'Custom'}
                                 </span>
                               </div>
                               <p className="mt-1 truncate text-[11px] text-[#7f8da4]">
