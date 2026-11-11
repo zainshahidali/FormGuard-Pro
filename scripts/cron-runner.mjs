@@ -97,6 +97,7 @@ const SettingsSchema = new mongoose.Schema(
       fromEmail: String,
     },
     testBotEmail: String,
+    isDailyTestingEnabled: { type: Boolean, default: true },
   },
   { timestamps: true }
 );
@@ -693,6 +694,13 @@ async function main() {
     console.log('[FormGuard Cron] MongoDB Connected successfully.');
 
     const settings = await Settings.findOne();
+
+    if (settings && settings.isDailyTestingEnabled === false) {
+      console.log('\n[FormGuard Cron] ⏸️ Daily automated testing is currently turned OFF in settings. Skipping run.');
+      await mongoose.disconnect();
+      process.exit(0);
+    }
+
     const activeSites = await Site.find({ isActive: true });
 
     console.log(`[FormGuard Cron] Found ${activeSites.length} active site(s) to monitor.`);

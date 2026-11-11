@@ -69,6 +69,7 @@ export default function RunAllModal({ isOpen, onClose, onComplete }: RunAllModal
       const res = await fetch('/api/test/run-all', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ manual: true }),
       });
 
       const data = await res.json();

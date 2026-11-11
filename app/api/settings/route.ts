@@ -21,6 +21,7 @@ export async function GET() {
           fromEmail: 'alerts@formguardpro.com',
         },
         testBotEmail: 'test@gmail.com',
+        isDailyTestingEnabled: true,
       });
     }
     return NextResponse.json({ success: true, settings });
@@ -79,6 +80,10 @@ export async function POST(req: NextRequest) {
         pass: body.smtpConfig.pass || '',
         fromEmail: body.smtpConfig.fromEmail || 'alerts@formguardpro.com',
       };
+    }
+
+    if (body.isDailyTestingEnabled !== undefined) {
+      settings.isDailyTestingEnabled = Boolean(body.isDailyTestingEnabled);
     }
 
     await settings.save();

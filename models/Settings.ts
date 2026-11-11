@@ -14,6 +14,7 @@ export interface ISettings extends Document {
   defaultSlackChannelName?: string;
   smtpConfig?: ISmtpConfig;
   testBotEmail: string;
+  isDailyTestingEnabled: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -42,6 +43,10 @@ const SettingsSchema = new Schema<ISettings>(
     testBotEmail: {
       type: String,
       default: 'test@gmail.com',
+    },
+    isDailyTestingEnabled: {
+      type: Boolean,
+      default: true,
     },
   },
   {

@@ -31,7 +31,7 @@ export default function LogDetailModal({ log, onClose }: LogDetailModalProps) {
     <div className="fixed inset-0 z-[75] grid place-items-center bg-ink/55 px-4 backdrop-blur-sm animate-fade-in">
       <div className="animate-toast w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden rounded-[22px] bg-white shadow-[0_30px_90px_rgba(12,24,45,.3)] text-ink">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-line px-6 py-4.5 bg-[#fbfcfe] shrink-0">
+        <div className="flex items-center justify-between border-b border-line px-6 py-4 bg-[#fbfcfe] shrink-0">
           <div className="flex items-center gap-3">
             <span
               className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${

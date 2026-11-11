@@ -33,6 +33,23 @@ export async function POST(req: NextRequest) {
     await connectToDatabase();
     const settings = await Settings.findOne();
 
+    // Check if daily automated testing is globally paused in settings (unless triggered manually from UI)
+    const body = await req.json().catch(() => ({}));
+    const isManual = body?.manual === true || req.headers.get('x-manual-trigger') === 'true';
+
+    if (settings && settings.isDailyTestingEnabled === false && !isManual) {
+      console.log('[FormGuard Cron] Daily automated testing is currently turned OFF in settings. Skipping run.');
+      return NextResponse.json({
+        success: true,
+        message: 'Daily automated testing is currently turned OFF in settings. Scheduled run skipped.',
+        skipped: true,
+        total: 0,
+        passed: 0,
+        failed: 0,
+        results: [],
+      });
+    }
+
     // 2. Fetch all active sites
     const activeSites = await Site.find({ isActive: true });
 

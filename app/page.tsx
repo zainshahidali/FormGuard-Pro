@@ -36,6 +36,7 @@ export default function DashboardPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [siteFilter, setSiteFilter] = useState<'all' | 'healthy' | 'failing'>('all');
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [isDailyEnabled, setIsDailyEnabled] = useState(true);
 
   const notify = (message: string, tone: 'success' | 'info' | 'error' = 'success') => {
     setNotice({ id: Date.now(), message, tone });
@@ -43,19 +44,24 @@ export default function DashboardPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [sitesRes, logsRes] = await Promise.all([
+      const [sitesRes, logsRes, settingsRes] = await Promise.all([
         fetch('/api/sites'),
         fetch('/api/logs?limit=50'),
+        fetch('/api/settings'),
       ]);
 
       const sitesData = await sitesRes.json();
       const logsData = await logsRes.json();
+      const settingsData = await settingsRes.json();
 
       if (sitesData.success) {
         setSites(sitesData.sites || []);
       }
       if (logsData.success) {
         setLogs(logsData.logs || []);
+      }
+      if (settingsData.success && settingsData.settings) {
+        setIsDailyEnabled(settingsData.settings.isDailyTestingEnabled !== false);
       }
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
@@ -68,8 +74,19 @@ export default function DashboardPage() {
     fetchData();
 
     const handleRefetch = () => fetchData();
+    const handleToggleSync = (e: any) => {
+      if (e.detail?.enabled !== undefined) {
+        setIsDailyEnabled(e.detail.enabled);
+      }
+    };
+
     window.addEventListener('formguard:refetch', handleRefetch);
-    return () => window.removeEventListener('formguard:refetch', handleRefetch);
+    window.addEventListener('formguard:daily-testing-toggled', handleToggleSync);
+
+    return () => {
+      window.removeEventListener('formguard:refetch', handleRefetch);
+      window.removeEventListener('formguard:daily-testing-toggled', handleToggleSync);
+    };
   }, [fetchData]);
 
   // Run single site test
@@ -183,8 +200,8 @@ export default function DashboardPage() {
       siteFilter === 'all'
         ? true
         : siteFilter === 'healthy'
-        ? site.lastStatus === 'healthy'
-        : site.lastStatus === 'failing';
+          ? site.lastStatus === 'healthy'
+          : site.lastStatus === 'failing';
 
     return matchesSearch && matchesFilter;
   });
@@ -216,63 +233,65 @@ export default function DashboardPage() {
         </div>
 
         {/* 4 Stat Cards */}
-        <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="panel animate-rise p-4.5">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="panel animate-rise p-5 sm:p-6 transition-all duration-200 hover:shadow-[0_12px_32px_rgba(21,38,72,0.07)]">
             <div className="flex items-start justify-between">
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#eef1ff] text-cobalt">
-                <Globe size={17} />
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#eef1ff] text-cobalt">
+                <Globe size={18} />
               </span>
-              <ArrowUpRight size={15} className="text-[#b5c0d2]" />
+              <ArrowUpRight size={16} className="text-[#b5c0d2]" />
             </div>
-            <p className="mt-4 font-display text-[27px] font-extrabold leading-none tracking-tight text-ink">
+            <p className="mt-4 font-display text-[28px] font-extrabold leading-none tracking-tight text-ink">
               {totalSites}
             </p>
-            <p className="mt-1.5 text-[12px] font-semibold text-[#4d5c76]">Websites monitored</p>
-            <p className="mt-2 text-[11px] text-[#91a0b5]">
+            <p className="mt-2 text-[12.5px] font-semibold text-[#4d5c76]">Websites monitored</p>
+            <p className="mt-1.5 text-[11.5px] text-[#91a0b5]">
               {healthySites} healthy · {failingSites} failing
             </p>
           </div>
 
-          <div className="panel animate-rise p-4.5" style={{ animationDelay: '60ms' }}>
+          <div className="panel animate-rise p-5 sm:p-6 transition-all duration-200 hover:shadow-[0_12px_32px_rgba(21,38,72,0.07)]" style={{ animationDelay: '60ms' }}>
             <div className="flex items-start justify-between">
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#f0ecff] text-[#7655d8]">
-                <Layers size={17} />
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#f0ecff] text-[#7655d8]">
+                <Layers size={18} />
               </span>
-              <ArrowUpRight size={15} className="text-[#b5c0d2]" />
+              <ArrowUpRight size={16} className="text-[#b5c0d2]" />
             </div>
-            <p className="mt-4 font-display text-[27px] font-extrabold leading-none tracking-tight text-ink">
+            <p className="mt-4 font-display text-[28px] font-extrabold leading-none tracking-tight text-ink">
               {totalForms}
             </p>
-            <p className="mt-1.5 text-[12px] font-semibold text-[#4d5c76]">Forms tracked</p>
-            <p className="mt-2 text-[11px] text-[#91a0b5]">Across {totalSites} WordPress sites</p>
+            <p className="mt-2 text-[12.5px] font-semibold text-[#4d5c76]">Forms tracked</p>
+            <p className="mt-1.5 text-[11.5px] text-[#91a0b5]">Across {totalSites} WordPress sites</p>
           </div>
 
-          <div className="panel animate-rise p-4.5" style={{ animationDelay: '120ms' }}>
+          <div className="panel animate-rise p-5 sm:p-6 transition-all duration-200 hover:shadow-[0_12px_32px_rgba(21,38,72,0.07)]" style={{ animationDelay: '120ms' }}>
             <div className="flex items-start justify-between">
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#fff2e3] text-[#d8892c]">
-                <Activity size={17} />
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#fff2e3] text-[#d8892c]">
+                <Activity size={18} />
               </span>
-              <ArrowUpRight size={15} className="text-[#b5c0d2]" />
+              <ArrowUpRight size={16} className="text-[#b5c0d2]" />
             </div>
-            <p className="mt-4 font-display text-[27px] font-extrabold leading-none tracking-tight text-ink">
+            <p className="mt-4 font-display text-[28px] font-extrabold leading-none tracking-tight text-ink">
               {testsTodayCount}
             </p>
-            <p className="mt-1.5 text-[12px] font-semibold text-[#4d5c76]">Tests run today</p>
-            <p className="mt-2 text-[11px] text-[#91a0b5]">04:00 UTC schedule</p>
+            <p className="mt-2 text-[12.5px] font-semibold text-[#4d5c76]">Tests run today</p>
+            <p className="mt-1.5 text-[11.5px] text-[#91a0b5]">
+              {isDailyEnabled ? '04:00 UTC schedule' : 'Daily auto-test: Paused'}
+            </p>
           </div>
 
-          <div className="panel animate-rise p-4.5" style={{ animationDelay: '180ms' }}>
+          <div className="panel animate-rise p-5 sm:p-6 transition-all duration-200 hover:shadow-[0_12px_32px_rgba(21,38,72,0.07)]" style={{ animationDelay: '180ms' }}>
             <div className="flex items-start justify-between">
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#e7f8f2] text-mint">
-                <ShieldCheck size={17} />
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#e7f8f2] text-mint">
+                <ShieldCheck size={18} />
               </span>
-              <ArrowUpRight size={15} className="text-[#b5c0d2]" />
+              <ArrowUpRight size={16} className="text-[#b5c0d2]" />
             </div>
-            <p className="mt-4 font-display text-[27px] font-extrabold leading-none tracking-tight text-ink">
+            <p className="mt-4 font-display text-[28px] font-extrabold leading-none tracking-tight text-ink">
               {successRate}%
             </p>
-            <p className="mt-1.5 text-[12px] font-semibold text-[#4d5c76]">Success rate</p>
-            <p className="mt-2 text-[11px] text-[#91a0b5]">
+            <p className="mt-2 text-[12.5px] font-semibold text-[#4d5c76]">Success rate</p>
+            <p className="mt-1.5 text-[11.5px] text-[#91a0b5]">
               {passedLogsCount} / {logs.length || 0} total tests
             </p>
           </div>
@@ -301,11 +320,10 @@ export default function DashboardPage() {
                     {cd.rate}%
                   </span>
                   <div
-                    className={`w-full max-w-[42px] rounded-t-lg transition-all ${
-                      i === chartDays.length - 1
+                    className={`w-full max-w-[42px] rounded-t-lg transition-all ${i === chartDays.length - 1
                         ? 'bg-cobalt'
                         : 'bg-[#d9e2fb] group-hover:bg-[#aebbfa]'
-                    }`}
+                      }`}
                     style={{ height: `${Math.max(12, cd.rate)}%` }}
                   />
                   <span className="text-[10.5px] font-semibold text-[#9aa6b9]">{cd.label}</span>
@@ -338,18 +356,30 @@ export default function DashboardPage() {
                 <span className="grid h-10 w-10 place-items-center rounded-xl bg-white/10 text-[#8fa6ff]">
                   <CalendarClock size={19} />
                 </span>
-                <span className="pill bg-white/10 text-[#a7e9d8]">
-                  <span className="dot-live" /> Engine online
-                </span>
+                  <span
+                    className={`pill ${isDailyEnabled ? 'bg-white/10 text-[#a7e9d8]' : 'bg-white/10 text-[#ffb4b4]'
+                      }`}
+                  >
+                    <span className={`dot-live ${isDailyEnabled ? '' : '!bg-[#ff5a5a]'}`} />{' '}
+                    {isDailyEnabled ? 'Engine online' : 'Schedule paused'}
+                  </span>
               </div>
               <p className="text-[11px] font-bold uppercase tracking-[.14em] text-[#8ba0c3]">
                 Next automated run
               </p>
               <p className="mt-2 font-display text-[30px] font-extrabold leading-none tracking-tight">
-                04:00 <span className="text-[16px] font-semibold text-[#9fb0cc]">UTC</span>
+                {isDailyEnabled ? (
+                  <>
+                    04:00 <span className="text-[16px] font-semibold text-[#9fb0cc]">UTC</span>
+                  </>
+                ) : (
+                  <span className="text-[22px] font-bold text-[#ffb4b4]">PAUSED</span>
+                )}
               </p>
               <p className="mt-2 text-[12px] text-[#a4b5d1]">
-                Daily · 09:00 AM PKT · {totalForms} forms queued
+                {isDailyEnabled
+                  ? `Daily · 09:00 AM PKT · ${totalForms} forms queued`
+                  : 'Daily auto-test is turned off in navbar'}
               </p>
             </div>
             <div className="relative mt-8 space-y-3">
@@ -403,9 +433,8 @@ export default function DashboardPage() {
                   <button
                     key={mode}
                     onClick={() => setSiteFilter(mode)}
-                    className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold capitalize transition ${
-                      siteFilter === mode ? 'bg-white text-ink shadow-sm' : 'text-[#8491a7] hover:text-ink'
-                    }`}
+                    className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold capitalize transition ${siteFilter === mode ? 'bg-white text-ink shadow-sm' : 'text-[#8491a7] hover:text-ink'
+                      }`}
                   >
                     {mode}
                   </button>
@@ -510,9 +539,8 @@ export default function DashboardPage() {
                     className="flex w-full items-center gap-3 px-5 py-3.5 text-left transition hover:bg-[#fafbfe]"
                   >
                     <span
-                      className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${
-                        passed ? 'bg-[#e7f8f2] text-mint' : 'bg-[#ffeded] text-[#dc5262]'
-                      }`}
+                      className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${passed ? 'bg-[#e7f8f2] text-mint' : 'bg-[#ffeded] text-[#dc5262]'
+                        }`}
                     >
                       {passed ? <CircleCheck size={16} /> : <CircleAlert size={16} />}
                     </span>
