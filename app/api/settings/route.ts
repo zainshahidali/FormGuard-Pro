@@ -61,7 +61,14 @@ export async function POST(req: NextRequest) {
     }
 
     if (body.testBotEmail !== undefined) {
-      settings.testBotEmail = body.testBotEmail;
+      const testEmail = String(body.testBotEmail).trim();
+      if (testEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(testEmail)) {
+        return NextResponse.json(
+          { success: false, error: 'Test submission email is not a valid email address.' },
+          { status: 400 }
+        );
+      }
+      settings.testBotEmail = testEmail || 'test@gmail.com';
     }
 
     if (body.smtpConfig) {

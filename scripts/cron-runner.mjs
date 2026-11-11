@@ -76,6 +76,7 @@ const SiteSchema = new mongoose.Schema(
     verificationMethod: { type: String, default: 'text_visible' },
     expectedSuccessValue: { type: String, required: true },
     notificationPreferences: { type: NotificationPreferencesSchema, default: () => ({}) },
+    captchaBypassKey: { type: String, default: '' },
     isActive: { type: Boolean, default: true },
     lastStatus: { type: String, default: 'pending' },
     lastCheckedAt: { type: Date },
@@ -121,10 +122,227 @@ const Site = mongoose.models.Site || mongoose.model('Site', SiteSchema);
 const Settings = mongoose.models.Settings || mongoose.model('Settings', SettingsSchema);
 const TestLog = mongoose.models.TestLog || mongoose.model('TestLog', TestLogSchema);
 
+// CAPTCHA bypass + form error diagnostics (mirrors lib/tester.ts)
+const CAPTCHA_BYPASS_HEADER = 'x-formguard-key';
+
+const FORM_ERROR_SELECTORS = [
+  '[class*="wpforms-error-container"]',
+  '.wpforms-error',
+  '.wpforms-form [role="alert"]',
+  '.wpcf7-not-valid-tip',
+  '.wpcf7 form.invalid .wpcf7-response-output',
+  '.wpcf7 form.spam .wpcf7-response-output',
+  '.wpcf7 form.failed .wpcf7-response-output',
+  '.elementor-message-danger',
+  '.metform-error',
+  '.mf-error-message',
+  '.mf-main-response-wrap.mf-error-res',
+  '.gform_validation_errors',
+  '.gfield_validation_message',
+  '.validation_message',
+].join(', ');
+
+const CAPTCHA_PATTERN = /re-?captcha|h-?captcha|turnstile|captcha|verify (that )?you are (a )?human|spam/i;
+
+function normalizeHost(u) {
+  try {
+    return new URL(u).hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+// Only POST requests to the client's own site get the secret header.
+async function attachCaptchaBypassHeader(page, siteUrl, key) {
+  const siteHost = normalizeHost(siteUrl);
+  if (!siteHost) return;
+  await page.route(
+    (url) => normalizeHost(url.href) === siteHost,
+    async (route) => {
+      const request = route.request();
+      if (request.method() !== 'POST') return route.continue();
+      return route.continue({ headers: { ...request.headers(), [CAPTCHA_BYPASS_HEADER]: key } });
+    }
+  );
+}
+
+async function collectVisibleFormErrors(page) {
+  const messages = await page
+    .evaluate((selectors) => {
+      const seen = new Set();
+      const out = [];
+      document.querySelectorAll(selectors).forEach((el) => {
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden') return;
+        const text = (el.textContent || '').replace(/\s+/g, ' ').replace(/^Form error message\s*/i, '').trim();
+        if (text && !seen.has(text)) {
+          seen.add(text);
+          out.push(text);
+        }
+      });
+      return out;
+    }, FORM_ERROR_SELECTORS)
+    .catch(() => []);
+  return messages.filter((m) => !messages.some((other) => other !== m && other.includes(m)));
+}
+
+function buildSubmissionBlockedError(errors, bypassKeyConfigured) {
+  const captchaMsg = errors.find((e) => CAPTCHA_PATTERN.test(e));
+  if (captchaMsg) {
+    const score = captchaMsg.match(/\((0(?:\.\d+)?|1(?:\.0+)?)\)/)?.[1];
+    const advice = bypassKeyConfigured
+      ? 'A CAPTCHA bypass key is configured for this site, but the site still enforced CAPTCHA. Check that the FormGuard snippet is installed on the WordPress site and that its key matches.'
+      : "The form most likely works for real visitors, but the anti-spam check rejected the automated browser. Add a CAPTCHA bypass key in this site's settings and install the FormGuard snippet on the WordPress site.";
+    return new Error(`Blocked by CAPTCHA${score ? ` (score ${score})` : ''}: ${advice} Site message: "${captchaMsg}"`);
+  }
+  return new Error(`WordPress form validation blocked submission: ${errors.map((e) => `"${e}"`).join(' | ')}`);
+}
+
+// Raw reply of the most recent form submission request, kept for failure diagnostics.
+let lastSubmissionResponse = '';
+
+// Server-side submission verdict (mirrors lib/tester.ts)
+function detectSubmissionPlugin(url, method, postData) {
+  if (method !== 'POST') return null;
+  if (/\/metform\/v1\/entries\/insert\//.test(url)) return 'MetForm';
+  if (/\/contact-form-7\/v1\/contact-forms\/\d+\/feedback/.test(url)) return 'Contact Form 7';
+  if (/admin-ajax\.php/.test(url)) {
+    if (/elementor_pro_forms_send_form/.test(postData)) return 'Elementor Pro';
+    if (/wpforms_submit/.test(postData)) return 'WPForms';
+  }
+  return null;
+}
+
+function flattenMessages(value) {
+  if (!value) return '';
+  if (typeof value === 'string') {
+    return value
+      .replace(/<span[^>]*class="[^"]*wpforms-hidden[^"]*"[^>]*>[\s\S]*?<\/span>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+  if (Array.isArray(value)) return value.map(flattenMessages).filter(Boolean).join(' | ');
+  if (typeof value === 'object') return Object.values(value).map(flattenMessages).filter(Boolean).join(' | ');
+  return String(value);
+}
+
+function summarizeHtmlError(raw) {
+  if (!raw) return '';
+  if (!/<html|<!doctype/i.test(raw)) return raw.slice(0, 200);
+  const title = (raw.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '')
+    .replace(/&[a-z#0-9]+;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const body = (raw.match(/<body[^>]*>([\s\S]*?)<\/body>/i)?.[1] || raw)
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&[a-z#0-9]+;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return [title, body].filter(Boolean).join(' — ').slice(0, 300);
+}
+
+function httpFailureHint(status) {
+  if (status >= 500) {
+    return 'WordPress crashed (PHP fatal error) while processing the submission, so no entry/email was completed. This is usually caused by a plugin hooked into form submission or email sending (SMTP/mail plugin, MetForm integrations, CRM/webhook add-ons) or a PHP version conflict. Check the WordPress debug log or the hosting error log for the exact error.';
+  }
+  if (status === 401 || status === 403) {
+    return 'This often means a cached/expired security nonce (page cache such as LiteSpeed/WP Rocket) or a security plugin/firewall blocking the request.';
+  }
+  return 'The site refused the submission request.';
+}
+
+function watchSubmissionResponse(page, timeoutMs) {
+  return page
+    .waitForResponse((res) => {
+      const req = res.request();
+      return !!detectSubmissionPlugin(req.url(), req.method(), req.postData() || '');
+    }, { timeout: timeoutMs })
+    .then(async (res) => {
+      const req = res.request();
+      const plugin = detectSubmissionPlugin(req.url(), req.method(), req.postData() || '') || 'Form';
+      const raw = await res.text().catch(() => '');
+      lastSubmissionResponse = `[FormResponse] ${plugin} HTTP ${res.status()}: ${raw.replace(/\s+/g, ' ').slice(0, 400)}`;
+      let json = null;
+      try { json = JSON.parse(raw); } catch {}
+
+      if (res.status() >= 400) {
+        const detail = flattenMessages(json?.message || json?.data?.message || json?.error) || summarizeHtmlError(raw);
+        return {
+          ok: false,
+          plugin,
+          message: `${plugin} rejected the submission (HTTP ${res.status()})${detail ? `: "${detail}"` : ''}. ${httpFailureHint(res.status())}`,
+        };
+      }
+      if (!json) return null;
+
+      if (plugin === 'MetForm') {
+        // MetForm pre-fills `error` with a default "Something went wrong." and leaves it there on
+        // success, so only `status` decides the outcome.
+        const errors = flattenMessages(json.error);
+        if (Number(json.status) !== 1) {
+          return { ok: false, plugin, message: `MetForm rejected the submission: "${errors || flattenMessages(json.data?.message) || 'unknown error'}"` };
+        }
+        return { ok: true, plugin, message: flattenMessages(json.data?.message) };
+      }
+      if (plugin === 'Contact Form 7') {
+        if (json.status !== 'mail_sent') {
+          const hint = json.status === 'mail_failed' ? ' The submission was received but WordPress failed to send the email (check SMTP / mail settings).' : '';
+          return { ok: false, plugin, message: `Contact Form 7 returned "${json.status}": "${flattenMessages(json.message)}".${hint}` };
+        }
+        return { ok: true, plugin, message: flattenMessages(json.message) };
+      }
+      if (plugin === 'Elementor Pro' || plugin === 'WPForms') {
+        if (json.success === false) {
+          return { ok: false, plugin, message: `${plugin} rejected the submission: "${flattenMessages(json.data?.message || json.data?.errors || json.data) || 'unknown error'}"` };
+        }
+        return { ok: true, plugin, message: flattenMessages(json.data?.message) };
+      }
+      return null;
+    })
+    .catch(() => null);
+}
+
+// Pin the test to the exact form (by plugin form ID), preferring the copy rendered for visitors. Mirrors lib/tester.ts
+async function resolveFormRoot(page, scopeSelector) {
+  const scope = (scopeSelector || '').trim();
+  if (!scope) return page;
+  const candidates = page.locator(scope);
+  await candidates.first().waitFor({ state: 'attached', timeout: 10000 }).catch(() => {});
+  const count = await candidates.count().catch(() => 0);
+  if (count === 0) {
+    throw new Error(`Form not found on the page (looked for ${scope}). The form may have been removed, replaced with a new form, or moved to another page. Re-scan the website to update it.`);
+  }
+  for (let i = 0; i < count; i++) {
+    const rendered = await candidates.nth(i).evaluate((el) =>
+      Array.from(el.querySelectorAll('input:not([type="hidden"]), textarea, select')).some((f) => {
+        const r = f.getBoundingClientRect();
+        return r.width > 20 && r.height > 10;
+      })
+    ).catch(() => false);
+    if (rendered) return candidates.nth(i);
+  }
+  return candidates.first();
+}
+
+// A form is tested once per run, on one page, no matter how many pages show it. Mirrors lib/tester.ts
+function uniqueFormsToTest(forms) {
+  const seen = new Set();
+  return forms.filter((form) => {
+    const key = (form.scopeSelector || '').trim();
+    if (!key) return true;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 // Runner Logic
 async function runFormTest(site) {
   const startTime = Date.now();
   const consoleErrors = [];
+  lastSubmissionResponse = '';
   let browser = null;
   let page = null;
 
@@ -142,6 +360,11 @@ async function runFormTest(site) {
 
     page = await context.newPage();
 
+    const bypassKey = String(site.captchaBypassKey || '').trim();
+    if (bypassKey) {
+      await attachCaptchaBypassHeader(page, site.url, bypassKey);
+    }
+
     page.on('pageerror', (err) => {
       consoleErrors.push(`[PageError] ${err.message || String(err)}`);
     });
@@ -152,6 +375,19 @@ async function runFormTest(site) {
       }
     });
 
+    // Count how many real submission requests the form sends, to detect double submissions.
+    let submissionRequestCount = 0;
+    page.on('request', (req) => {
+      if (detectSubmissionPlugin(req.url(), req.method(), req.postData() || '')) submissionRequestCount++;
+    });
+    const noteDoubleSubmission = () => {
+      if (submissionRequestCount > 1) {
+        consoleErrors.push(
+          `[Warning] The form sent ${submissionRequestCount} submission requests for a single click on Submit. The website is double-submitting (duplicate entries/emails for real visitors too).`
+        );
+      }
+    };
+
     try {
       await page.goto(site.url, { waitUntil: 'networkidle', timeout: 30000 });
     } catch {
@@ -160,16 +396,18 @@ async function runFormTest(site) {
 
     await page.waitForTimeout(1000);
 
+    const formRoot = await resolveFormRoot(page, site.scopeSelector);
+
     // Fill fields
     if (site.fields && Array.isArray(site.fields)) {
       for (const field of site.fields) {
         if (!field.selector) continue;
-        const locator = page.locator(field.selector).first();
+        const locator = formRoot.locator(field.selector).first();
         await locator.waitFor({ state: 'attached', timeout: 10000 });
         await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
 
         const type = (field.type || 'text').toLowerCase();
-        const testVal = field.testValue || 'Test Value';
+        const testVal = (type === 'email' && String(site.testEmail || '').trim()) || field.testValue || 'Test Value';
         const wantsRandom = !testVal || testVal === '[Random Option]' || testVal.toLowerCase().includes('random');
 
         const inputTypeAttr = await locator.getAttribute('type').catch(() => null);
@@ -181,7 +419,7 @@ async function runFormTest(site) {
 
         if (hasCustomControl || (isSelectType && isHidden)) {
           try {
-            const clickTarget = hasCustomControl ? customControl : page.locator('.mf_select__control, .mf-input-select').first();
+            const clickTarget = hasCustomControl ? customControl : formRoot.locator('.mf_select__control, .mf-input-select').first();
             await clickTarget.click({ timeout: 4000 });
             await page.waitForTimeout(300);
 
@@ -251,23 +489,46 @@ async function runFormTest(site) {
     }
 
     // Submit
-    const submitBtn = page.locator(site.submitButtonSelector).first();
+    const submitBtn = formRoot.locator(site.submitButtonSelector).first();
     await submitBtn.waitFor({ state: 'visible', timeout: 10000 });
     await submitBtn.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+    const submissionVerdict = watchSubmissionResponse(page, 20000);
     await submitBtn.click({ timeout: 8000 });
 
     // Verify
     const verifyMethod = site.verificationMethod || 'text_visible';
     const expectedVal = site.expectedSuccessValue?.trim();
 
-    if (verifyMethod === 'text_visible') {
-      const textLoc = page.getByText(expectedVal, { exact: false }).first();
-      await textLoc.waitFor({ state: 'visible', timeout: 15000 });
-    } else if (verifyMethod === 'selector_visible') {
-      const selLoc = page.locator(expectedVal).first();
-      await selLoc.waitFor({ state: 'visible', timeout: 15000 });
-    } else if (verifyMethod === 'url_redirect') {
-      await page.waitForURL((url) => url.href.includes(expectedVal), { timeout: 15000 });
+    let domVerificationError = null;
+    try {
+      if (verifyMethod === 'text_visible') {
+        const textLoc = page.getByText(expectedVal, { exact: false }).first();
+        await textLoc.waitFor({ state: 'visible', timeout: 15000 });
+      } else if (verifyMethod === 'selector_visible') {
+        const selLoc = page.locator(expectedVal).first();
+        await selLoc.waitFor({ state: 'visible', timeout: 15000 });
+      } else if (verifyMethod === 'url_redirect') {
+        await page.waitForURL((url) => url.href.includes(expectedVal), { timeout: 15000 });
+      }
+    } catch (verifyErr) {
+      domVerificationError = verifyErr;
+    }
+
+    // The form builder's own server response is the source of truth.
+    const verdict = await submissionVerdict;
+    noteDoubleSubmission();
+    if (verdict && !verdict.ok) {
+      throw CAPTCHA_PATTERN.test(verdict.message)
+        ? buildSubmissionBlockedError([verdict.message], !!bypassKey)
+        : new Error(verdict.message);
+    }
+    if (domVerificationError) {
+      // Explain *why* verification failed when the form rendered an error (CAPTCHA, validation, etc.)
+      const errorsOnPage = await collectVisibleFormErrors(page);
+      if (errorsOnPage.length > 0) {
+        throw buildSubmissionBlockedError(errorsOnPage, !!bypassKey);
+      }
+      throw domVerificationError;
     }
 
     const durationMs = Date.now() - startTime;
@@ -292,7 +553,7 @@ async function runFormTest(site) {
       status: 'failed',
       durationMs,
       errorMessage: err.message || 'Unknown test failure',
-      consoleErrors: consoleErrors.slice(-10),
+      consoleErrors: [...consoleErrors.slice(-10), ...(lastSubmissionResponse ? [lastSubmissionResponse] : [])],
       screenshotBase64,
     };
   } finally {
@@ -444,7 +705,7 @@ async function main() {
 
       const formsToTest =
         site.forms && site.forms.length > 0
-          ? site.forms.filter((f) => f.isActive !== false)
+          ? uniqueFormsToTest(site.forms.filter((f) => f.isActive !== false))
           : [site];
 
       console.log(`    Testing ${formsToTest.length} form(s) for ${site.name}...`);
@@ -462,7 +723,10 @@ async function main() {
           submitButtonSelector: formItem.submitButtonSelector,
           verificationMethod: formItem.verificationMethod,
           expectedSuccessValue: formItem.expectedSuccessValue,
+          scopeSelector: formItem.scopeSelector || '',
           name: `${site.name} — ${formItem.name || 'Form'}`,
+          captchaBypassKey: site.captchaBypassKey || '',
+          testEmail: settings?.testBotEmail || '',
         };
 
         const formRes = await runFormTest(formPayload);

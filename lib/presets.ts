@@ -83,9 +83,9 @@ export const FORM_PRESETS: Record<string, FormPreset> = {
     name: 'MetForm Elementor Addon',
     pluginType: 'MetForm',
     description: 'MetForm input fields & confirmation container',
-    submitButtonSelector: 'button.metform-btn[type="submit"], .metform-btn',
+    submitButtonSelector: 'button.metform-btn[type="submit"], button.metform-btn, .metform-btn, button[type="submit"]',
     verificationMethod: 'selector_visible',
-    expectedSuccessValue: '.metform-success-message, .mf-success-message',
+    expectedSuccessValue: '.metform-success-message, .mf-response-msg-wrap, .mf-success-message',
     fields: [
       {
         label: 'Name',
@@ -117,9 +117,9 @@ export const FORM_PRESETS: Record<string, FormPreset> = {
     name: 'WPForms',
     pluginType: 'WPForms',
     description: 'Standard WPForms input classes & confirmation box',
-    submitButtonSelector: 'button.wpforms-submit[type="submit"]',
+    submitButtonSelector: 'button.wpforms-submit[type="submit"], button[name="wpforms[submit]"], .wpforms-submit',
     verificationMethod: 'selector_visible',
-    expectedSuccessValue: 'div.wpforms-confirmation-container-full, .wpforms-confirmation-container',
+    expectedSuccessValue: 'div.wpforms-confirmation-container-full, [id*="wpforms-confirmation"], .wpforms-confirmation-container',
     fields: [
       {
         label: 'Name',

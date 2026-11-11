@@ -28,7 +28,29 @@ import {
   LoaderCircle,
   AlertCircle,
   CircleCheck,
+  KeyRound,
+  Copy,
 } from 'lucide-react';
+
+function generateBypassKey(): string {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return 'fgp_' + Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function buildWpFormsBypassSnippet(key: string): string {
+  return `<?php
+/**
+ * FormGuard Pro — skip WPForms CAPTCHA (reCAPTCHA / hCaptcha / Turnstile)
+ * only for automated health-check submissions that carry the secret header.
+ * Real visitors are still fully protected.
+ */
+add_filter( 'wpforms_process_bypass_captcha', function ( $bypass ) {
+    $key = isset( $_SERVER['HTTP_X_FORMGUARD_KEY'] ) ? (string) $_SERVER['HTTP_X_FORMGUARD_KEY'] : '';
+    return $bypass || ( $key !== '' && hash_equals( '${key}', $key ) );
+} );
+`;
+}
 import { FORM_PRESETS } from '@/lib/presets';
 import { IFormField, IFormItem } from '@/models/Site';
 import { SectionCard, Toggle, FieldLabel, StatusPill, Toast, type Notice } from '@/components/ui';
@@ -123,6 +145,9 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
   const [notifyOnSuccess, setNotifyOnSuccess] = useState(
     initialData?.notificationPreferences?.notifyOnSuccess || false
   );
+
+  // CAPTCHA bypass key (sent as X-FormGuard-Key to the client's own site only)
+  const [captchaBypassKey, setCaptchaBypassKey] = useState<string>(initialData?.captchaBypassKey || '');
 
   // Operation / Feedback states
   const [isSaving, setIsSaving] = useState(false);
@@ -397,6 +422,7 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
           df.fields && df.fields.length > 0
             ? df.fields
             : [...presetFallback.fields],
+        scopeSelector: df.scopeSelector || '',
         submitButtonSelector:
           df.submitButtonSelector || presetFallback.submitButtonSelector,
         verificationMethod:
@@ -481,6 +507,7 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
         name: siteName.trim(),
         url: siteUrl.trim(),
         isActive: activeMonitoring,
+        captchaBypassKey: captchaBypassKey.trim(),
         forms: forms.map((f) => ({
           ...f,
           name: sanitizeName(f.name),
@@ -1255,6 +1282,84 @@ export default function SiteForm({ initialData, isEditing = false }: SiteFormPro
                   label="Notify on passed tests"
                 />
               </div>
+            </div>
+          </SectionCard>
+
+          {/* STEP 04: CAPTCHA bypass */}
+          <SectionCard
+            step="04"
+            icon={<KeyRound size={19} />}
+            title="CAPTCHA bypass for test submissions"
+            subtitle="Invisible CAPTCHAs (like reCAPTCHA v3) often reject automated browsers even when the form works for real visitors. A secret key lets the client site skip CAPTCHA only for FormGuard tests."
+            action={
+              captchaBypassKey.trim() ? (
+                <StatusPill tone="green">
+                  <Check size={10} /> Key set
+                </StatusPill>
+              ) : (
+                <StatusPill tone="gray">Optional</StatusPill>
+              )
+            }
+          >
+            <div className="px-5 py-6 sm:px-7">
+              <FieldLabel>Bypass key</FieldLabel>
+              <div className="flex flex-wrap gap-2">
+                <div className="relative min-w-0 flex-1">
+                  <KeyRound
+                    size={14}
+                    className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#98a4b8]"
+                  />
+                  <input
+                    className="field !pl-10 font-mono"
+                    value={captchaBypassKey}
+                    onChange={(e) => setCaptchaBypassKey(e.target.value)}
+                    placeholder="Leave empty if the site has no CAPTCHA"
+                    spellCheck={false}
+                    autoComplete="off"
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setCaptchaBypassKey(generateBypassKey());
+                    notify('New bypass key generated. Save the website and update the snippet on the client site.', 'info');
+                  }}
+                >
+                  <RefreshCw size={14} /> Generate
+                </button>
+              </div>
+              <p className="mt-2 text-[11px] leading-relaxed text-muted">
+                Sent as the <code className="font-mono">X-FormGuard-Key</code> header on form submissions to this
+                website&apos;s own domain only. It is never sent to Google or any other third party.
+              </p>
+
+              {captchaBypassKey.trim() && (
+                <div className="animate-rise mt-4 rounded-xl border border-line bg-[#fafbfe] p-4">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-[12.5px] font-semibold text-ink">
+                      WordPress snippet (WPForms) — add via WPCode or the theme&apos;s functions.php
+                    </p>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(buildWpFormsBypassSnippet(captchaBypassKey.trim()));
+                          notify('Snippet copied to clipboard.', 'success');
+                        } catch {
+                          notify('Could not access the clipboard. Select the snippet and copy it manually.', 'error');
+                        }
+                      }}
+                    >
+                      <Copy size={14} /> Copy snippet
+                    </button>
+                  </div>
+                  <pre className="max-h-64 overflow-auto rounded-lg bg-[#0f172a] p-3 text-[11px] leading-relaxed text-[#e2e8f0]">
+                    <code>{buildWpFormsBypassSnippet(captchaBypassKey.trim())}</code>
+                  </pre>
+                </div>
+              )}
             </div>
           </SectionCard>
         </div>

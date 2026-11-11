@@ -244,6 +244,7 @@ export default function RunAllModal({ isOpen, onClose, onComplete }: RunAllModal
               <div className="soft-scroll max-h-[240px] space-y-2 overflow-y-auto pr-1">
                 {results.results?.map((item: any, idx: number) => {
                   const passed = item.status === 'passed';
+                  const skipped = item.status === 'skipped';
                   return (
                     <div
                       key={idx}
@@ -253,6 +254,8 @@ export default function RunAllModal({ isOpen, onClose, onComplete }: RunAllModal
                         className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg ${
                           passed
                             ? 'bg-[#e7f8f2] text-mint'
+                            : skipped
+                            ? 'bg-[#fff4e0] text-[#d79b2d]'
                             : 'bg-[#ffeded] text-[#dc5262]'
                         }`}
                       >
@@ -267,7 +270,7 @@ export default function RunAllModal({ isOpen, onClose, onComplete }: RunAllModal
                           {item.siteName}
                         </p>
                         {item.errorMessage ? (
-                          <p className="truncate text-[10.5px] text-[#dc5262]">
+                          <p className={`truncate text-[10.5px] ${skipped ? 'text-[#d79b2d]' : 'text-[#dc5262]'}`}>
                             {item.errorMessage}
                           </p>
                         ) : (

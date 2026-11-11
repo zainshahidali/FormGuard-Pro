@@ -30,14 +30,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const forms = Array.isArray(body.forms) && body.forms.length > 0 ? body.forms : [];
+    const firstForm = forms[0];
+
     const newSite = await Site.create({
       name: body.name,
       url: body.url,
-      formPluginType: body.formPluginType || 'Elementor Pro',
-      fields: body.fields || [],
-      submitButtonSelector: body.submitButtonSelector || 'button[type="submit"]',
-      verificationMethod: body.verificationMethod || 'text_visible',
-      expectedSuccessValue: body.expectedSuccessValue || 'Thank you',
+      forms,
+      formPluginType: firstForm?.formPluginType || body.formPluginType || 'Elementor Pro',
+      fields: firstForm?.fields || body.fields || [],
+      submitButtonSelector: firstForm?.submitButtonSelector || body.submitButtonSelector || 'button[type="submit"]',
+      verificationMethod: firstForm?.verificationMethod || body.verificationMethod || 'text_visible',
+      expectedSuccessValue: firstForm?.expectedSuccessValue || body.expectedSuccessValue || 'Thank you',
       notificationPreferences: {
         useGlobalDefaults: body.notificationPreferences?.useGlobalDefaults ?? true,
         enableEmail: body.notificationPreferences?.enableEmail ?? true,
@@ -46,6 +50,7 @@ export async function POST(req: NextRequest) {
         customSlackWebhookUrl: body.notificationPreferences?.customSlackWebhookUrl || '',
         notifyOnSuccess: body.notificationPreferences?.notifyOnSuccess ?? false,
       },
+      captchaBypassKey: typeof body.captchaBypassKey === 'string' ? body.captchaBypassKey.trim() : '',
       isActive: body.isActive ?? true,
       lastStatus: 'pending',
     });

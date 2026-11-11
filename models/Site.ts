@@ -13,6 +13,8 @@ export interface IFormItem {
   pageUrl: string;
   formPluginType: 'Elementor Pro' | 'Contact Form 7' | 'MetForm' | 'WPForms' | 'Gravity Forms' | 'Custom';
   fields: IFormField[];
+  /** CSS selector of this exact form (by plugin form ID). Field/submit selectors are resolved inside it. */
+  scopeSelector?: string;
   submitButtonSelector: string;
   verificationMethod: 'text_visible' | 'selector_visible' | 'url_redirect';
   expectedSuccessValue: string;
@@ -42,6 +44,8 @@ export interface ISite extends Document {
   expectedSuccessValue?: string;
   forms: IFormItem[];
   notificationPreferences: INotificationPreferences;
+  /** Secret sent as the X-FormGuard-Key header so the WordPress site can skip CAPTCHA for test submissions. */
+  captchaBypassKey?: string;
   isActive: boolean;
   lastStatus: 'healthy' | 'failing' | 'pending';
   lastCheckedAt?: Date;
@@ -89,6 +93,7 @@ const FormItemSchema = new Schema<IFormItem>(
       type: [FormFieldSchema],
       default: [],
     },
+    scopeSelector: { type: String, default: '' },
     submitButtonSelector: {
       type: String,
       required: true,
@@ -153,6 +158,11 @@ const SiteSchema = new Schema<ISite>(
     notificationPreferences: {
       type: NotificationPreferencesSchema,
       default: () => ({}),
+    },
+    captchaBypassKey: {
+      type: String,
+      default: '',
+      trim: true,
     },
     isActive: {
       type: Boolean,

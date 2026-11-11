@@ -32,21 +32,40 @@ export async function PUT(req: NextRequest, { params }: Params) {
     await connectToDatabase();
     const body = await req.json();
 
+    const forms = Array.isArray(body.forms) ? body.forms : undefined;
+    const firstForm = forms && forms.length > 0 ? forms[0] : undefined;
+
+    const updateData: any = {
+      name: body.name,
+      url: body.url,
+      notificationPreferences: body.notificationPreferences,
+      isActive: body.isActive,
+    };
+
+    if (typeof body.captchaBypassKey === 'string') {
+      updateData.captchaBypassKey = body.captchaBypassKey.trim();
+    }
+
+    if (forms !== undefined) {
+      updateData.forms = forms;
+      if (firstForm) {
+        updateData.formPluginType = firstForm.formPluginType;
+        updateData.fields = firstForm.fields;
+        updateData.submitButtonSelector = firstForm.submitButtonSelector;
+        updateData.verificationMethod = firstForm.verificationMethod;
+        updateData.expectedSuccessValue = firstForm.expectedSuccessValue;
+      }
+    } else {
+      if (body.formPluginType !== undefined) updateData.formPluginType = body.formPluginType;
+      if (body.fields !== undefined) updateData.fields = body.fields;
+      if (body.submitButtonSelector !== undefined) updateData.submitButtonSelector = body.submitButtonSelector;
+      if (body.verificationMethod !== undefined) updateData.verificationMethod = body.verificationMethod;
+      if (body.expectedSuccessValue !== undefined) updateData.expectedSuccessValue = body.expectedSuccessValue;
+    }
+
     const updatedSite = await Site.findByIdAndUpdate(
       params.id,
-      {
-        $set: {
-          name: body.name,
-          url: body.url,
-          formPluginType: body.formPluginType,
-          fields: body.fields,
-          submitButtonSelector: body.submitButtonSelector,
-          verificationMethod: body.verificationMethod,
-          expectedSuccessValue: body.expectedSuccessValue,
-          notificationPreferences: body.notificationPreferences,
-          isActive: body.isActive,
-        },
-      },
+      { $set: updateData },
       { new: true, runValidators: true }
     );
 

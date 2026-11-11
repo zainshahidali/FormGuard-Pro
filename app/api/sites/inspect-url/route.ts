@@ -171,7 +171,11 @@ async function extractFormsFromPage(page: Page, pageUrl: string) {
         container.querySelector('.metform-form-content') ||
         container.closest('.metform-form-content') ||
         container.hasAttribute('data-metform-form-id') ||
-        container.querySelector('input[name="form_id"]')
+        container.closest('.mf-form-wrapper') ||
+        // Elementor Pro forms also carry a hidden form_id input, so that alone must not mean MetForm.
+        (container.querySelector('input[name="form_id"]') &&
+          !formClasses.includes('elementor-form') &&
+          !container.closest('.elementor-widget-form'))
       ) {
         detectedPlugin = 'MetForm';
         verificationMethod = 'selector_visible';
@@ -200,7 +204,7 @@ async function extractFormsFromPage(page: Page, pageUrl: string) {
       ) {
         detectedPlugin = 'WPForms';
         verificationMethod = 'selector_visible';
-        expectedSuccessValue = 'div.wpforms-confirmation-container-full';
+        expectedSuccessValue = 'div.wpforms-confirmation-container-full, [id*="wpforms-confirmation"]';
       } else if (
         formClasses.includes('gform') ||
         formId.startsWith('gform_') ||
@@ -237,6 +241,19 @@ async function extractFormsFromPage(page: Page, pageUrl: string) {
       const fields: any[] = [];
       const seenNames = new Set();
 
+      // Only apply visual honeypot checks when the form is actually visible to visitors. Forms in closed popups,
+      // tabs or responsive (mobile/desktop-only) sections have no visible fields, and all their fields would
+      // otherwise look like decoys.
+      // Elementor entrance animations keep whole sections at visibility:hidden until scrolled into view,
+      // so field visibility is only meaningful relative to the form's own visibility.
+      const containerIsVisible = window.getComputedStyle(container as Element).visibility !== 'hidden';
+      const containerIsRendered = inputElements.some((inp: any) => {
+        const t = (inp.getAttribute('type') || '').toLowerCase();
+        if (t === 'hidden') return false;
+        const r = inp.getBoundingClientRect();
+        return r.width > 20 && r.height > 10;
+      });
+
       inputElements.forEach((el: any) => {
         const tagName = el.tagName.toLowerCase();
         const typeAttr = (el.getAttribute('type') || (tagName === 'textarea' ? 'textarea' : 'text')).toLowerCase();
@@ -244,16 +261,30 @@ async function extractFormsFromPage(page: Page, pageUrl: string) {
         const idAttr = el.getAttribute('id') || '';
         const placeholder = el.getAttribute('placeholder') || '';
 
-        // Skip WordPress system hidden fields
+        // Hidden inputs are plugin plumbing (form id, tokens, page url, reCAPTCHA response...).
+        // Filling them corrupts the submission. The only exception is a custom dropdown
+        // (MetForm / react-select) that stores the chosen option in a hidden input.
         if (typeAttr === 'hidden') {
-          const lowerName = nameAttr.toLowerCase();
-          const isSystemHidden =
-            lowerName.includes('nonce') ||
-            lowerName.includes('referer') ||
-            lowerName.includes('form_id') ||
-            lowerName === 'action' ||
-            lowerName.startsWith('_');
-          if (isSystemHidden) return;
+          const isCustomSelectValue = !!el.parentElement?.querySelector(
+            '.mf_select__control, [class*="select__control"], [class*="custom-select"]'
+          ) || !!el.closest('.mf-input-select');
+          if (!isCustomSelectValue) return;
+        }
+
+        // Skip anti-spam honeypot fields: real visitors never see or fill them, and filling them flags the
+        // submission as spam (e.g. WPForms' 1px absolutely-positioned decoy field, Elementor/CF7 honeypots).
+        const honeypotHint = `${el.className || ''} ${el.closest('[class*="honeypot"], [class*="hp-"], .wpforms-field-hp')?.className || ''}`.toLowerCase();
+        if (honeypotHint.includes('honeypot') || honeypotHint.includes('wpforms-field-hp')) return;
+        if (containerIsRendered && typeAttr !== 'file' && typeAttr !== 'checkbox' && typeAttr !== 'radio') {
+          const fieldWrap = el.closest('.wpforms-field, .elementor-field-group, .wpcf7-form-control-wrap, .gfield, .mf-input-wrapper') || el;
+          const wrapStyle = window.getComputedStyle(fieldWrap);
+          const r = el.getBoundingClientRect();
+          const isDecoy =
+            r.width <= 2 ||
+            r.height <= 2 ||
+            (wrapStyle.position === 'absolute' && parseInt(wrapStyle.zIndex || '0', 10) < 0) ||
+            (wrapStyle.visibility === 'hidden' && containerIsVisible);
+          if (isDecoy && !el.closest('.mf-input-select')) return;
         }
 
         // Skip react-select internal dummy inputs without name
@@ -308,6 +339,10 @@ async function extractFormsFromPage(page: Page, pageUrl: string) {
         if (typeAttr === 'email' || nameAttr.toLowerCase().includes('email')) {
           fieldType = 'email';
           testValue = 'test@gmail.com';
+        } else if (typeAttr === 'number') {
+          // Number inputs (often used for phone fields) reject letters, spaces and "+".
+          fieldType = 'tel';
+          testValue = '5550192834';
         } else if (typeAttr === 'tel' || nameAttr.toLowerCase().includes('phone') || nameAttr.toLowerCase().includes('tel')) {
           fieldType = 'tel';
           testValue = '+1 555-019-2834';
@@ -360,27 +395,66 @@ async function extractFormsFromPage(page: Page, pageUrl: string) {
         }
       }
 
-      // Extract plugin-specific form ID if present
+      // Extract the plugin's own form ID. This is what makes a form unique: two different forms
+      // (e.g. "Contact Form" and "Get A Quote") often have identical fields and must never be merged.
+      // scopeSelector lets the tester target exactly this form when a page holds several look-alikes.
       let wpFormId = '';
-      const cf7Val = (container.querySelector('input[name="_wpcf7"]') as HTMLInputElement)?.value;
-      if (cf7Val) wpFormId = `cf7-${cf7Val}`;
+      let scopeSelector = '';
+      const cssEsc = (v: string) => String(v).replace(/["\\]/g, '\\$&');
 
-      const mfVal =
-        container.getAttribute('data-metform-form-id') ||
-        (container.querySelector('input[name="form_id"]') as HTMLInputElement)?.value;
-      if (mfVal) wpFormId = `metform-${mfVal}`;
+      if (detectedPlugin === 'MetForm') {
+        const mfWrap = container.closest('.mf-form-wrapper');
+        const mfVal =
+          mfWrap?.getAttribute('data-form-id') ||
+          container.getAttribute('data-metform-form-id') ||
+          (container.querySelector('input[name="form_id"]') as HTMLInputElement)?.value ||
+          '';
+        if (mfVal) {
+          wpFormId = `metform-${mfVal}`;
+          if (mfWrap?.getAttribute('data-form-id')) {
+            scopeSelector = `.mf-form-wrapper[data-form-id="${cssEsc(mfVal)}"]`;
+          }
+        }
+      } else if (detectedPlugin === 'Contact Form 7') {
+        const cf7Val = (container.querySelector('input[name="_wpcf7"]') as HTMLInputElement)?.value;
+        if (cf7Val) {
+          wpFormId = `cf7-${cf7Val}`;
+          scopeSelector = `form:has(input[name="_wpcf7"][value="${cssEsc(cf7Val)}"])`;
+        }
+      } else if (detectedPlugin === 'Elementor Pro') {
+        const elVal = (container.querySelector('input[name="form_id"]') as HTMLInputElement)?.value;
+        if (elVal) {
+          wpFormId = `elementor-${elVal}`;
+          scopeSelector = `form:has(input[name="form_id"][value="${cssEsc(elVal)}"])`;
+        }
+      } else if (detectedPlugin === 'WPForms') {
+        const wpfVal =
+          container.getAttribute('data-formid') ||
+          (container.querySelector('input[name="wpforms[id]"]') as HTMLInputElement)?.value ||
+          '';
+        if (wpfVal) {
+          wpFormId = `wpforms-${wpfVal}`;
+          scopeSelector = `form[data-formid="${cssEsc(wpfVal)}"], #wpforms-form-${cssEsc(wpfVal)}`;
+        }
+      } else if (detectedPlugin === 'Gravity Forms') {
+        const gfVal =
+          (formId.match(/^gform_(\d+)/)?.[1]) ||
+          (container.querySelector('input[name="gform_submit"]') as HTMLInputElement)?.value ||
+          '';
+        if (gfVal) {
+          wpFormId = `gravity-${gfVal}`;
+          scopeSelector = `#gform_${cssEsc(gfVal)}`;
+        }
+      }
 
-      const wpfVal =
-        container.getAttribute('data-formid') ||
-        (container.id && container.id.includes('wpforms') ? container.id : '');
-      if (wpfVal) wpFormId = `wpforms-${wpfVal}`;
-
-      // Fallback signature from field selectors and types
+      // Fallback signature (only when the plugin exposes no ID): field selectors + nearby heading.
+      // The heading keeps two different ID-less forms with identical fields from being merged.
       const fieldSig = fields
         .map((f: any) => `${f.selector || f.label}:${f.type}`)
         .sort()
         .join('|');
-      const fingerprint = wpFormId || `${detectedPlugin}::${fieldSig}::${submitButtonSelector}`;
+      const headingSig = nearbyHeading?.textContent?.trim().replace(/\s+/g, ' ').toLowerCase() || '';
+      const fingerprint = wpFormId || `${detectedPlugin}::${fieldSig}::${submitButtonSelector}::${headingSig}`;
 
       return {
         id: `form-${currentUrl.replace(/[^a-zA-Z0-9]/g, '-')}-${index}`,
@@ -389,6 +463,7 @@ async function extractFormsFromPage(page: Page, pageUrl: string) {
         title: formTitle,
         name: formTitle,
         fingerprint,
+        scopeSelector,
         detectedPlugin,
         formPluginType: detectedPlugin,
         fields,
@@ -401,6 +476,26 @@ async function extractFormsFromPage(page: Page, pageUrl: string) {
     // Only return valid forms that belong to approved WordPress form plugins and have fields
     return mapped.filter((f): f is NonNullable<typeof f> => f !== null && f.fields && f.fields.length > 0);
   }, pageUrl);
+}
+
+const FORM_READY_SELECTOR = 'form, .metform-form-content, .elementor-form, .wpforms-container, .wpcf7-form';
+
+// Wait for form builders to render and for cache plugins (e.g. LiteSpeed guest mode) to finish any self-reload.
+async function waitForFormsToSettle(page: Page, selectorTimeoutMs: number) {
+  await page.waitForSelector(FORM_READY_SELECTOR, { timeout: selectorTimeoutMs }).catch(() => {});
+  await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+}
+
+// Extract forms, retrying once if the page navigated/reloaded mid-extraction ("Execution context was destroyed").
+async function safeExtractForms(page: Page, pageUrl: string) {
+  try {
+    return await extractFormsFromPage(page, pageUrl);
+  } catch (err: any) {
+    console.warn(`[Crawler] Retrying form extraction on ${pageUrl}:`, err?.message || err);
+    await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
+    await waitForFormsToSettle(page, 4000);
+    return await extractFormsFromPage(page, pageUrl);
+  }
 }
 
 // Smart deduplication helper to merge identical forms repeating across multiple pages
@@ -432,6 +527,8 @@ function deduplicateForms(rawForms: any[]) {
       if (isCurrentDedicated && !isExistingDedicated) {
         existing.pageUrl = form.pageUrl;
         existing.pageTitle = form.pageTitle;
+        existing.title = form.title;
+        existing.name = form.name || form.title;
       }
     }
   }
@@ -489,11 +586,8 @@ export async function POST(req: NextRequest) {
 
     // 1. Visit the root URL
     try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 });
-      // Wait for dynamic/React form builders like MetForm or Elementor to render
-      await page.waitForSelector('form, .metform-form-content, .elementor-form, .wpforms-container, .wpcf7-form', {
-        timeout: 2500,
-      }).catch(() => {});
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await waitForFormsToSettle(page, 6000);
     } catch (navErr: any) {
       return NextResponse.json(
         { success: false, error: `Failed to load page: ${navErr.message || String(navErr)}` },
@@ -503,7 +597,7 @@ export async function POST(req: NextRequest) {
 
     // Single-page scan or Deep multi-page crawl
     if (!deepScan) {
-      const rawForms = await extractFormsFromPage(page, url);
+      const rawForms = await safeExtractForms(page, url);
       const forms = deduplicateForms(rawForms);
       if (!forms || forms.length === 0) {
         return NextResponse.json({
@@ -522,7 +616,7 @@ export async function POST(req: NextRequest) {
     const scannedUrls: string[] = [];
 
     // Extract forms from root/homepage first
-    const firstPageForms = await extractFormsFromPage(page, url);
+    const firstPageForms = await safeExtractForms(page, url);
     scannedUrls.push(url);
     if (firstPageForms && firstPageForms.length > 0) {
       allDiscoveredForms.push(...firstPageForms);
@@ -538,13 +632,10 @@ export async function POST(req: NextRequest) {
         batch.map(async (pageUrl) => {
           const subPage = await context.newPage();
           try {
-            await subPage.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 8000 });
-            await subPage.waitForSelector(
-              'form, .metform-form-content, .elementor-form, .wpforms-container, .wpcf7-form',
-              { timeout: 1500 }
-            ).catch(() => {});
+            await subPage.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+            await waitForFormsToSettle(subPage, 4000);
             scannedUrls.push(pageUrl);
-            const formsOnPage = await extractFormsFromPage(subPage, pageUrl);
+            const formsOnPage = await safeExtractForms(subPage, pageUrl);
             if (formsOnPage && formsOnPage.length > 0) {
               allDiscoveredForms.push(...formsOnPage);
             }

@@ -5,6 +5,7 @@ import Settings from '@/models/Settings';
 import TestLog from '@/models/TestLog';
 import { runSiteTest } from '@/lib/tester';
 import { dispatchAlerts } from '@/lib/notifier';
+import { tryAcquireSiteRun, releaseSiteRun } from '@/lib/run-lock';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,8 +32,22 @@ export async function POST(req: NextRequest) {
 
     const settings = await Settings.findOne();
 
+    // Never run the same site twice at once: every run submits real forms and sends real emails.
+    const lockId = String(site._id);
+    if (!tryAcquireSiteRun(lockId)) {
+      return NextResponse.json(
+        { success: false, error: `"${site.name}" is already being tested. Please wait for the current test to finish.` },
+        { status: 409 }
+      );
+    }
+
     // Run Playwright site test across all active forms
-    const testResult = await runSiteTest(site);
+    let testResult;
+    try {
+      testResult = await runSiteTest(site, { testEmail: settings?.testBotEmail });
+    } finally {
+      releaseSiteRun(lockId);
+    }
 
     // Save test log with formResults breakdown
     const testLog = await TestLog.create({

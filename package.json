@@ -10,7 +10,8 @@
     "test:db": "node scripts/test-db.mjs",
     "test:playwright": "npx tsx scripts/test-playwright.mjs",
     "seed": "node scripts/seed-demo.mjs",
-    "cron:run": "node scripts/cron-runner.mjs"
+    "cron:run": "node scripts/cron-runner.mjs",
+    "test:discovery": "npx tsx --tsconfig tsconfig.json scripts/test-form-discovery.mts"
   },
   "dependencies": {
     "clsx": "^2.1.1",
@@ -36,4 +37,3 @@
     "typescript": "^5.7.2"
   }
 }
-

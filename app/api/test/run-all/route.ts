@@ -5,6 +5,7 @@ import Settings from '@/models/Settings';
 import TestLog from '@/models/TestLog';
 import { runSiteTest } from '@/lib/tester';
 import { dispatchAlerts } from '@/lib/notifier';
+import { tryAcquireSiteRun, releaseSiteRun } from '@/lib/run-lock';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300; // Allow sufficient runtime for automated multi-site batch testing
@@ -54,7 +55,25 @@ export async function POST(req: NextRequest) {
     for (const site of activeSites) {
       try {
         console.log(`[FormGuard Cron] Testing site: ${site.name} (${site.url})`);
-        const result = await runSiteTest(site);
+        // Skip a site that is already being tested elsewhere (e.g. a manual "Test Now" is in progress).
+        const lockId = String(site._id);
+        if (!tryAcquireSiteRun(lockId)) {
+          console.log(`[FormGuard Cron] Skipping ${site.name}: a test is already running for it.`);
+          testResults.push({
+            siteId: site._id,
+            siteName: site.name,
+            status: 'skipped',
+            durationMs: 0,
+            errorMessage: 'Skipped: this site is already being tested.',
+          });
+          continue;
+        }
+        let result;
+        try {
+          result = await runSiteTest(site, { testEmail: settings?.testBotEmail });
+        } finally {
+          releaseSiteRun(lockId);
+        }
 
         if (result.status === 'passed') {
           passedCount++;

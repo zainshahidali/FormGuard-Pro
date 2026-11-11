@@ -262,6 +262,38 @@ export default function SettingsPage() {
               </div>
             </section>
 
+            {/* Test Submission Email Card */}
+            <section className="panel animate-rise p-5 sm:p-6">
+              <div className="mb-5 flex items-center gap-3">
+                <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#fff4e0] text-[#d79b2d]">
+                  <Mail size={17} />
+                </span>
+                <div>
+                  <h2 className="font-display text-[14px] font-bold text-ink">Test submission email</h2>
+                  <p className="text-[11.5px] text-muted">
+                    The email address typed into every email field when a form is tested.
+                  </p>
+                </div>
+              </div>
+              <label className="field-label">Email address used in tests</label>
+              <input
+                className="field"
+                type="email"
+                value={testBotEmail}
+                onChange={(e) => setTestBotEmail(e.target.value)}
+                placeholder="formguard-tests@youragency.com"
+              />
+              <div className="mt-3 flex items-start gap-2 rounded-xl bg-[#f7f9fc] px-3.5 py-3 text-[11.5px] text-[#6b7b95]">
+                <Zap size={14} className="mt-0.5 shrink-0 text-[#d79b2d]" />
+                <span>
+                  Many forms email a confirmation copy to this address. Use a mailbox <strong className="text-ink">you
+                  own</strong> (for example a shared test inbox on your agency domain) so those copies come to you instead
+                  of a stranger&apos;s inbox, and so the client can filter tests by this sender. It replaces the email
+                  value in <strong className="text-ink">every</strong> email field, for manual and daily tests.
+                </span>
+              </div>
+            </section>
+
             {/* Notification Channels Card */}
             <section className="panel animate-rise p-5 sm:p-6">
               <div className="mb-5 flex items-center gap-3">
