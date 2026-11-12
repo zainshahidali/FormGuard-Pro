@@ -87,6 +87,9 @@ const TestLogSchema = new Schema<ITestLog>(
   }
 );
 
+TestLogSchema.index({ executedAt: -1, status: 1 });
+TestLogSchema.index({ siteId: 1, executedAt: -1 });
+
 export const TestLog: Model<ITestLog> =
   mongoose.models.TestLog || mongoose.model<ITestLog>('TestLog', TestLogSchema);
 

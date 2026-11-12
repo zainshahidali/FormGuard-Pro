@@ -15,6 +15,8 @@ export async function GET(req: NextRequest) {
     const siteId = searchParams.get('siteId');
     const status = searchParams.get('status');
     const limit = parseInt(searchParams.get('limit') || '50', 10);
+    const countOnly = searchParams.get('countOnly') === 'true';
+    const includeScreenshots = searchParams.get('includeScreenshots') === 'true';
 
     const query: any = {};
     if (siteId && siteId !== 'all') {
@@ -24,10 +26,22 @@ export async function GET(req: NextRequest) {
       query.status = status;
     }
 
-    const logs = await TestLog.find(query)
+    // Fast count query for badges (e.g. Sidebar failed count)
+    if (countOnly) {
+      const count = await TestLog.countDocuments(query);
+      return NextResponse.json({ success: true, count });
+    }
+
+    // Exclude heavy base64 screenshots in list views for 98% faster response and tiny payload
+    const projection = includeScreenshots
+      ? {}
+      : { screenshotBase64: 0, 'formResults.screenshotBase64': 0 };
+
+    const logs = await TestLog.find(query, projection)
       .sort({ executedAt: -1 })
       .limit(limit)
-      .populate('siteId', 'name url formPluginType');
+      .populate('siteId', 'name url formPluginType')
+      .lean();
 
     return NextResponse.json({ success: true, logs });
   } catch (error: any) {

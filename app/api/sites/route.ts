@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   try {
     await connectToDatabase();
-    const sites = await Site.find().sort({ createdAt: -1 });
+    const sites = await Site.find().sort({ createdAt: -1 }).lean();
     return NextResponse.json({ success: true, sites });
   } catch (error: any) {
     console.error('Error fetching sites:', error);

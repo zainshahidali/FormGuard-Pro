@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   CircleCheck,
@@ -22,10 +22,31 @@ interface LogDetailModalProps {
 }
 
 export default function LogDetailModal({ log, onClose }: LogDetailModalProps) {
+  const [currentLog, setCurrentLog] = useState<any>(log);
+  const [loadingDetails, setLoadingDetails] = useState<boolean>(false);
+
+  useEffect(() => {
+    setCurrentLog(log);
+    // On-demand fetch of heavy screenshots only when modal opens for a failed log
+    if (log?._id && log.status === 'failed' && !log.screenshotBase64) {
+      setLoadingDetails(true);
+      fetch(`/api/logs/${log._id}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && data.log) {
+            setCurrentLog(data.log);
+          }
+        })
+        .catch((err) => console.error('Failed to load log details:', err))
+        .finally(() => setLoadingDetails(false));
+    }
+  }, [log]);
+
   if (!log) return null;
 
-  const isPassed = log.status === 'passed';
-  const site = log.siteId || {};
+  const activeLog = currentLog || log;
+  const isPassed = activeLog.status === 'passed';
+  const site = activeLog.siteId || {};
 
   return (
     <div className="fixed inset-0 z-[75] grid place-items-center bg-ink/55 px-4 backdrop-blur-sm animate-fade-in">
@@ -197,14 +218,14 @@ export default function LogDetailModal({ log, onClose }: LogDetailModalProps) {
           )}
 
           {/* Failure Screenshot */}
-          {log.screenshotBase64 ? (
+          {activeLog.screenshotBase64 ? (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-ink">
                   <ImageIcon size={13} className="text-cobalt" /> Failure Viewport Screenshot
                 </span>
                 <a
-                  href={`data:image/png;base64,${log.screenshotBase64}`}
+                  href={`data:image/png;base64,${activeLog.screenshotBase64}`}
                   download={`failure-${site.name || 'test'}.png`}
                   className="flex items-center gap-1 text-[11.5px] font-semibold text-cobalt hover:underline"
                 >
@@ -213,11 +234,16 @@ export default function LogDetailModal({ log, onClose }: LogDetailModalProps) {
               </div>
               <div className="overflow-hidden rounded-xl border border-line bg-[#fbfcfe] p-2">
                 <img
-                  src={`data:image/png;base64,${log.screenshotBase64}`}
+                  src={`data:image/png;base64,${activeLog.screenshotBase64}`}
                   alt="Failure Viewport Screenshot"
                   className="h-auto w-full rounded-lg border border-line shadow-sm"
                 />
               </div>
+            </div>
+          ) : loadingDetails ? (
+            <div className="flex items-center justify-center gap-2 rounded-xl border border-line bg-[#fbfcfe] p-6 text-[12px] text-muted">
+              <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-cobalt border-t-transparent" />
+              Loading high-resolution failure screenshot…
             </div>
           ) : !isPassed ? (
             <div className="rounded-xl border border-line bg-[#fbfcfe] p-4 text-center text-[11.5px] italic text-muted">

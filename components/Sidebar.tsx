@@ -48,13 +48,12 @@ export default function Sidebar({
       })
       .catch(() => setDbStatus('disconnected'));
 
-    // Fetch recent failed count for badge
-    fetch('/api/logs?limit=50')
+    // Fetch recent failed count for badge (fast count query, avoids heavy payload)
+    fetch('/api/logs?status=failed&countOnly=true')
       .then((res) => res.json())
       .then((data) => {
-        if (data.logs) {
-          const fails = data.logs.filter((l: any) => l.status === 'failed').length;
-          setFailedLogsCount(fails);
+        if (typeof data.count === 'number') {
+          setFailedLogsCount(data.count);
         }
       })
       .catch(() => {});
