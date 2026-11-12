@@ -6,28 +6,32 @@ import TestLog from '@/models/TestLog';
 import { runSiteTest } from '@/lib/tester';
 import { dispatchAlerts } from '@/lib/notifier';
 import { tryAcquireSiteRun, releaseSiteRun } from '@/lib/run-lock';
+import { AUTH_COOKIE_NAME, verifySessionToken } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300; // Allow sufficient runtime for automated multi-site batch testing
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Verify authorization secret if CRON_SECRET is configured in environment
+    // 1. Verify authorization: allow logged-in admin session OR valid CRON_SECRET
     const cronSecret = process.env.CRON_SECRET;
-    if (cronSecret) {
-      const authHeader = req.headers.get('authorization');
-      const customSecretHeader = req.headers.get('x-cron-secret');
-      const urlSecret = req.nextUrl.searchParams.get('secret');
+    const authHeader = req.headers.get('authorization');
+    const customSecretHeader = req.headers.get('x-cron-secret');
+    const urlSecret = req.nextUrl.searchParams.get('secret');
 
-      const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
-      const providedSecret = bearerToken || customSecretHeader || urlSecret;
+    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
+    const providedSecret = bearerToken || customSecretHeader || urlSecret;
 
-      if (providedSecret !== cronSecret) {
-        return NextResponse.json(
-          { success: false, error: 'Unauthorized: Invalid CRON_SECRET' },
-          { status: 401 }
-        );
-      }
+    const hasValidCronSecret = Boolean(cronSecret && providedSecret === cronSecret);
+
+    const sessionCookie = req.cookies.get(AUTH_COOKIE_NAME)?.value;
+    const validSession = await verifySessionToken(sessionCookie);
+
+    if (!hasValidCronSecret && !validSession) {
+      return NextResponse.json(
+        { success: false, error: 'Unauthorized: Admin login or valid CRON_SECRET required.' },
+        { status: 401 }
+      );
     }
 
     await connectToDatabase();
@@ -35,7 +39,10 @@ export async function POST(req: NextRequest) {
 
     // Check if daily automated testing is globally paused in settings (unless triggered manually from UI)
     const body = await req.json().catch(() => ({}));
-    const isManual = body?.manual === true || req.headers.get('x-manual-trigger') === 'true';
+    const isManual =
+      body?.manual === true ||
+      req.headers.get('x-manual-trigger') === 'true' ||
+      Boolean(validSession);
 
     if (settings && settings.isDailyTestingEnabled === false && !isManual) {
       console.log('[FormGuard Cron] Daily automated testing is currently turned OFF in settings. Skipping run.');
