@@ -14,10 +14,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className="min-h-screen bg-canvas text-ink antialiased font-sans selection:bg-cobalt/20 selection:text-cobaltdark">
-        <AppShell>{children}</AppShell>
-      </body>
-    </html>
-  );
+        <html lang="en" suppressHydrationWarning>
+          <body
+            suppressHydrationWarning
+            className="min-h-screen bg-canvas text-ink antialiased font-sans selection:bg-cobalt/20 selection:text-cobaltdark"
+          >
+            <AppShell>{children}</AppShell>
+          </body>
+        </html>
+        );
 }

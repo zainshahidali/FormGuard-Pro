@@ -19,27 +19,27 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('formguard:open-run-all', handleOpenRunAll);
   }, []);
 
-  if (isLoginPage) {
-    return <main className="min-h-screen">{children}</main>;
-  }
-
   return (
     <div className="min-h-screen bg-canvas text-ink antialiased">
-      <Sidebar isOpen={menuOpen} onClose={() => setMenuOpen(false)} />
-      <div className="lg:pl-[248px] flex flex-col min-h-screen">
-        <Navbar onOpenMenu={() => setMenuOpen(true)} onRunAll={() => setRunAllOpen(true)} />
-        <main className="flex-1">{children}</main>
+        {!isLoginPage && <Sidebar isOpen={menuOpen} onClose={() => setMenuOpen(false)} />}
+        <div className={isLoginPage ? 'min-h-screen' : 'lg:pl-[248px] flex flex-col min-h-screen'}>
+          {!isLoginPage && (
+            <Navbar onOpenMenu={() => setMenuOpen(true)} onRunAll={() => setRunAllOpen(true)} />
+          )}
+          <main className="flex-1">{children}</main>
+        </div>
+        {!isLoginPage && (
+          <RunAllModal
+            isOpen={runAllOpen}
+            onClose={() => setRunAllOpen(false)}
+            onComplete={() => {
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new Event('formguard:refetch'));
+              }
+            }}
+          />
+        )}
       </div>
-      <RunAllModal
-        isOpen={runAllOpen}
-        onClose={() => setRunAllOpen(false)}
-        onComplete={() => {
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new Event('formguard:refetch'));
-          }
-        }}
-      />
-    </div>
-  );
+      );
 }
 
