@@ -1,11 +1,15 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { usePathname } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Navbar from '@/components/Navbar';
 import RunAllModal from '@/components/RunAllModal';
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const isLoginPage = pathname === '/login';
+
   const [menuOpen, setMenuOpen] = useState(false);
   const [runAllOpen, setRunAllOpen] = useState(false);
 
@@ -14,6 +18,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     window.addEventListener('formguard:open-run-all', handleOpenRunAll);
     return () => window.removeEventListener('formguard:open-run-all', handleOpenRunAll);
   }, []);
+
+  if (isLoginPage) {
+    return <main className="min-h-screen">{children}</main>;
+  }
 
   return (
     <div className="min-h-screen bg-canvas text-ink antialiased">

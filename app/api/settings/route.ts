@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/mongodb';
 import Settings from '@/models/Settings';
+import {
+  verifyPassword,
+  hashPassword,
+  generateSalt,
+  DEFAULT_ADMIN_PASSWORD,
+  DEFAULT_ADMIN_USERNAME,
+} from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,11 +27,31 @@ export async function GET() {
           pass: '',
           fromEmail: 'alerts@formguardpro.com',
         },
+        adminAuth: {
+          username: DEFAULT_ADMIN_USERNAME,
+          passwordHash: '',
+          salt: '',
+          updatedAt: new Date(),
+        },
         testBotEmail: 'test@gmail.com',
         isDailyTestingEnabled: true,
       });
     }
-    return NextResponse.json({ success: true, settings });
+
+    const safeSettings = settings.toObject ? settings.toObject() : { ...settings };
+    // Redact password hash & salt before returning to client
+    if (safeSettings.adminAuth) {
+      safeSettings.adminAuth = {
+        username: safeSettings.adminAuth.username || DEFAULT_ADMIN_USERNAME,
+        updatedAt: safeSettings.adminAuth.updatedAt,
+      };
+    } else {
+      safeSettings.adminAuth = {
+        username: DEFAULT_ADMIN_USERNAME,
+      };
+    }
+
+    return NextResponse.json({ success: true, settings: safeSettings });
   } catch (error: any) {
     console.error('Error fetching settings:', error);
     return NextResponse.json(
@@ -48,9 +75,9 @@ export async function POST(req: NextRequest) {
       settings.defaultNotificationEmails = Array.isArray(body.defaultNotificationEmails)
         ? body.defaultNotificationEmails
         : body.defaultNotificationEmails
-            .split(',')
-            .map((e: string) => e.trim())
-            .filter(Boolean);
+          .split(',')
+          .map((e: string) => e.trim())
+          .filter(Boolean);
     }
 
     if (body.defaultSlackWebhookUrl !== undefined) {
@@ -86,9 +113,80 @@ export async function POST(req: NextRequest) {
       settings.isDailyTestingEnabled = Boolean(body.isDailyTestingEnabled);
     }
 
+    if (body.adminAuth) {
+      const { currentPassword, newUsername, newPassword } = body.adminAuth;
+
+      if (!currentPassword) {
+        return NextResponse.json(
+          { success: false, error: 'Current password is required to update admin credentials.' },
+          { status: 400 }
+        );
+      }
+
+      const storedAuth = settings.adminAuth;
+      let isCurrentValid = false;
+
+      if (storedAuth?.passwordHash && storedAuth?.salt) {
+        isCurrentValid = await verifyPassword(
+          currentPassword,
+          storedAuth.passwordHash,
+          storedAuth.salt
+        );
+      } else {
+        isCurrentValid = currentPassword === DEFAULT_ADMIN_PASSWORD;
+      }
+
+      if (!isCurrentValid) {
+        return NextResponse.json(
+          { success: false, error: 'Current password does not match.' },
+          { status: 400 }
+        );
+      }
+
+      const updatedUser = (newUsername || storedAuth?.username || DEFAULT_ADMIN_USERNAME).trim();
+      if (!updatedUser) {
+        return NextResponse.json(
+          { success: false, error: 'Username cannot be blank.' },
+          { status: 400 }
+        );
+      }
+
+      let passwordHash = storedAuth?.passwordHash;
+      let salt = storedAuth?.salt;
+
+      if (newPassword && String(newPassword).trim()) {
+        if (String(newPassword).length < 6) {
+          return NextResponse.json(
+            { success: false, error: 'New password must be at least 6 characters.' },
+            { status: 400 }
+          );
+        }
+        salt = generateSalt();
+        passwordHash = await hashPassword(String(newPassword), salt);
+      } else if (!passwordHash) {
+        salt = generateSalt();
+        passwordHash = await hashPassword(DEFAULT_ADMIN_PASSWORD, salt);
+      }
+
+      settings.adminAuth = {
+        username: updatedUser,
+        passwordHash: passwordHash || '',
+        salt: salt || '',
+        updatedAt: new Date(),
+      };
+    }
+
     await settings.save();
 
-    return NextResponse.json({ success: true, settings });
+    const safeSettings = settings.toObject ? settings.toObject() : { ...settings };
+    if (safeSettings.adminAuth) {
+      safeSettings.adminAuth = {
+        username: safeSettings.adminAuth.username || DEFAULT_ADMIN_USERNAME,
+        updatedAt: safeSettings.adminAuth.updatedAt,
+      };
+    }
+
+    return NextResponse.json({ success: true, settings: safeSettings });
   } catch (error: any) {
     console.error('Error updating settings:', error);
     return NextResponse.json(

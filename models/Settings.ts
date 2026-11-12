@@ -8,11 +8,19 @@ export interface ISmtpConfig {
   fromEmail: string;
 }
 
+export interface IAdminAuth {
+  username: string;
+  passwordHash?: string;
+  salt?: string;
+  updatedAt?: Date;
+}
+
 export interface ISettings extends Document {
   defaultNotificationEmails: string[];
   defaultSlackWebhookUrl?: string;
   defaultSlackChannelName?: string;
   smtpConfig?: ISmtpConfig;
+  adminAuth?: IAdminAuth;
   testBotEmail: string;
   isDailyTestingEnabled: boolean;
   createdAt: Date;
@@ -43,6 +51,12 @@ const SettingsSchema = new Schema<ISettings>(
     testBotEmail: {
       type: String,
       default: 'test@gmail.com',
+    },
+    adminAuth: {
+      username: { type: String, default: 'admin' },
+      passwordHash: { type: String, default: '' },
+      salt: { type: String, default: '' },
+      updatedAt: { type: Date, default: Date.now },
     },
     isDailyTestingEnabled: {
       type: Boolean,
